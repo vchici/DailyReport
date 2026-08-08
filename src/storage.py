@@ -86,3 +86,16 @@ def save_daily_report(content: str, date_str: str | None = None) -> Path:
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
     return file_path
+
+
+def append_plan_suggestion(content: str, date_str: str | None = None) -> Path:
+    """将 /plan 的建议追加保存到当日计划文件（Markdown）。"""
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    plans_dir = DATA_DIR / "plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    file_path = plans_dir / f"{date_str}.md"
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(content)
+        f.write("\n\n---\n\n")
+    return file_path

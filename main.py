@@ -47,6 +47,16 @@ async def main():
             print("\n⏳ 正在分析...\n")
             result = await agent.plan(content)
             print(result)
+
+            # 询问是否保存建议
+            try:
+                save = input("\n是否保存建议到本地？(y/n，直接回车默认 y): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                save = "n"
+            if save in ("", "y", "yes"):
+                from src.storage import append_plan_suggestion
+                path = append_plan_suggestion(f"## 计划\n\n{result}", agent._today_str())
+                print(f"✓ 已保存到 {path}")
             print()
 
         elif cmd_line.startswith("/done "):
