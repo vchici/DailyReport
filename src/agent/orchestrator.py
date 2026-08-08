@@ -6,13 +6,14 @@ from ..config import Settings
 from ..generation.llm_engine import generate_report
 from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
+from ..retriever import retrieve_related
 from ..storage import add_entry, get_all_events, load_entries
 from .planner import plan_report
 from .state import AgentState
 
 
 class DailyReportAgent:
-    """日报 Agent 主控。串联 感知→规划→执行→渲染 全流程。"""
+    """日报 Agent 主控。串联 感知→持久化→检索→汇总→规划→生成→渲染 全流程。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -22,7 +23,7 @@ class DailyReportAgent:
         )
 
     async def run(self, raw_input: str) -> str:
-        """处理新输入，持久化到当日文件，基于当日全部事件生成日报。"""
+        """处理新输入，持久化到当日文件，检索历史关联，生成日报。"""
         state = AgentState(raw_input=raw_input)
 
         try:
@@ -32,16 +33,22 @@ class DailyReportAgent:
             # Step 2: 持久化 —— 将本次事件和实体存入当日文件
             add_entry(raw_input, state.events, state.entities)
 
-            # Step 3: 汇总 —— 加载当日全部历史事件
+            # Step 3: 检索 —— 基于实体标签查找历史关联条目
+            state.related_entries = retrieve_related(state.entities)
+
+            # Step 4: 汇总 —— 加载当日全部历史事件
             all_events = get_all_events()
 
-            # Step 4: 规划 —— 根据全部事件生成报告大纲
+            # Step 5: 规划 —— 根据全部事件生成报告大纲
             state.outline = await plan_report(all_events)
 
-            # Step 5: 执行 —— 基于全部事件调用 LLM 生成日报正文
-            state.report = await generate_report(self.client, self.settings, all_events)
+            # Step 6: 生成 —— 基于全部事件和历史关联生成日报正文
+            state.report = await generate_report(
+                self.client, self.settings, all_events,
+                related_entries=state.related_entries,
+            )
 
-            # Step 6: 渲染 —— 套用模板输出最终内容
+            # Step 7: 渲染 —— 套用模板输出最终内容
             return render_report(state.report)
 
         except Exception as e:
