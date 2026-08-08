@@ -12,8 +12,12 @@ async def main():
     settings = Settings()
     agent = DailyReportAgent(settings)
 
+    existing = agent.today_entry_count()
+
     print("=" * 50)
     print("  日报 Agent — 输入你今天的工作内容")
+    if existing > 0:
+        print(f"  今日已记录 {existing} 条，新输入将合并生成")
     print("=" * 50)
     print()
 
@@ -30,13 +34,15 @@ async def main():
         print("输入为空，退出。")
         return
 
-    print("\n⏳ 正在生成日报...\n")
+    total = existing + 1
+    print(f"\n⏳ 正在基于今日全部 {total} 条记录生成日报...\n")
 
     try:
         report = await agent.run(raw_input)
         print("=" * 50)
         print(report)
         print("=" * 50)
+        print(f"\n✓ 已保存到 data/{agent._today_str()}.json（今日共 {total} 条）")
     except Exception as e:
         print(f"生成失败：{e}")
 
