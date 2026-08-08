@@ -30,12 +30,22 @@ def save_entries(entries: list[dict], date_str: str | None = None):
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
-def add_entry(raw_input: str, events: list[Event], entities: list[str] | None = None, date_str: str | None = None) -> list[dict]:
-    """添加一条新记录到当日文件，返回当日全部条目。"""
+def add_entry(
+    raw_input: str,
+    events: list[Event],
+    entities: list[str] | None = None,
+    status: str = "done",
+    date_str: str | None = None,
+) -> list[dict]:
+    """添加一条新记录到当日文件，返回当日全部条目。
+
+    status: "todo"（待办）或 "done"（已完成）
+    """
     entries = load_entries(date_str)
     entries.append({
         "time": datetime.now().strftime("%H:%M"),
         "raw_input": raw_input,
+        "status": status,
         "events": [
             {"type": e.type.value, "title": e.title, "detail": e.detail, "priority": e.priority}
             for e in events
@@ -44,6 +54,11 @@ def add_entry(raw_input: str, events: list[Event], entities: list[str] | None = 
     })
     save_entries(entries, date_str)
     return entries
+
+
+def get_today_entries(date_str: str | None = None) -> list[dict]:
+    """获取今日全部条目（含 status 字段）。"""
+    return load_entries(date_str)
 
 
 def get_all_events(date_str: str | None = None) -> list[Event]:
@@ -59,3 +74,15 @@ def get_all_events(date_str: str | None = None) -> list[Event]:
                 priority=e.get("priority", 0),
             ))
     return all_events
+
+
+def save_daily_report(content: str, date_str: str | None = None) -> Path:
+    """将日报保存为 Markdown 文件，返回保存路径。"""
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    reports_dir = DATA_DIR / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    file_path = reports_dir / f"{date_str}.md"
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return file_path

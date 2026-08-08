@@ -3,17 +3,15 @@ from datetime import datetime
 from openai import AsyncOpenAI
 
 from ..config import Settings
-from ..generation.llm_engine import generate_report
+from ..generation.llm_engine import generate_report, generate_suggestion
 from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
 from ..retriever import retrieve_related
-from ..storage import add_entry, get_all_events, load_entries
-from .planner import plan_report
-from .state import AgentState
+from ..storage import add_entry, get_today_entries, load_entries
 
 
 class DailyReportAgent:
-    """日报 Agent 主控。串联 感知→持久化→检索→汇总→规划→生成→渲染 全流程。"""
+    """日报 Agent 主控。支持 /plan /done /report 三种操作。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -22,42 +20,78 @@ class DailyReportAgent:
             base_url=settings.openai_base_url,
         )
 
-    async def run(self, raw_input: str) -> str:
-        """处理新输入，持久化到当日文件，检索历史关联，生成日报。"""
-        state = AgentState(raw_input=raw_input)
+    async def plan(self, raw_input: str) -> str:
+        """记录待办事项，基于历史关联给出建议方案。"""
+        try:
+            # 解析事件和实体
+            events, entities = await parse_events(self.client, self.settings, raw_input)
+
+            # 持久化为待办
+            add_entry(raw_input, events, entities, status="todo")
+
+            # 检索历史关联
+            related = retrieve_related(entities)
+
+            # 生成建议
+            suggestion = await generate_suggestion(
+                self.client, self.settings, raw_input, entities, related,
+            )
+            return f"📋 已记录待办\n\n{suggestion}"
+        except Exception as e:
+            return f"记录失败：{e}"
+
+    async def done(self, raw_input: str) -> str:
+        """记录已完成事项。"""
+        try:
+            events, entities = await parse_events(self.client, self.settings, raw_input)
+
+            add_entry(raw_input, events, entities, status="done")
+
+            # 统计今日完成数
+            entries = get_today_entries()
+            done_count = sum(1 for e in entries if e.get("status") == "done")
+            return f"✅ 已记录完成（今日共 {done_count} 项）"
+        except Exception as e:
+            return f"记录失败：{e}"
+
+    async def generate_daily_report(self) -> str:
+        """生成当日完整日报（合并待办和已完成，含历史关联发现）。"""
+        entries = get_today_entries()
+        if not entries:
+            return "今日暂无记录。"
+
+        # 汇总已完成事项的实体用于检索
+        all_entities: list[str] = []
+        for entry in entries:
+            if entry.get("status") == "done":
+                all_entities.extend(entry.get("entities", []))
+
+        related = retrieve_related(all_entities) if all_entities else []
 
         try:
-            # Step 1: 感知 —— 从原始文本提取结构化事件和实体标签
-            state.events, state.entities = await parse_events(self.client, self.settings, raw_input)
-
-            # Step 2: 持久化 —— 将本次事件和实体存入当日文件
-            add_entry(raw_input, state.events, state.entities)
-
-            # Step 3: 检索 —— 基于实体标签查找历史关联条目
-            state.related_entries = retrieve_related(state.entities)
-
-            # Step 4: 汇总 —— 加载当日全部历史事件
-            all_events = get_all_events()
-
-            # Step 5: 规划 —— 根据全部事件生成报告大纲
-            state.outline = await plan_report(all_events)
-
-            # Step 6: 生成 —— 基于全部事件和历史关联生成日报正文
-            state.report = await generate_report(
-                self.client, self.settings, all_events,
-                related_entries=state.related_entries,
+            report = await generate_report(
+                self.client, self.settings, entries,
+                related_entries=related,
             )
-
-            # Step 7: 渲染 —— 套用模板输出最终内容
-            return render_report(state.report)
-
+            return render_report(report)
         except Exception as e:
-            state.error = str(e)
-            raise
+            return f"日报生成失败：{e}"
 
     def today_entry_count(self) -> int:
         """获取今日已有记录条数。"""
         return len(load_entries())
+
+    def today_summary(self) -> str:
+        """获取今日概况（待办/完成数量）。"""
+        entries = get_today_entries()
+        todo_count = sum(1 for e in entries if e.get("status") == "todo")
+        done_count = sum(1 for e in entries if e.get("status") == "done")
+        parts = []
+        if done_count:
+            parts.append(f"已完成 {done_count} 项")
+        if todo_count:
+            parts.append(f"待办 {todo_count} 项")
+        return "，".join(parts) if parts else "暂无记录"
 
     @staticmethod
     def _today_str() -> str:
