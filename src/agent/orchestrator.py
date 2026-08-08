@@ -8,6 +8,7 @@ from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
 from ..retriever import retrieve_related
 from ..storage import add_entry, get_today_entries, load_entries
+from ..web_search import search_web
 
 
 class DailyReportAgent:
@@ -21,7 +22,7 @@ class DailyReportAgent:
         )
 
     async def plan(self, raw_input: str) -> str:
-        """记录待办事项，基于历史关联给出建议方案。"""
+        """记录待办事项，结合本地历史和联网搜索给出建议方案。"""
         try:
             # 解析事件和实体
             events, entities = await parse_events(self.client, self.settings, raw_input)
@@ -29,12 +30,17 @@ class DailyReportAgent:
             # 持久化为待办
             add_entry(raw_input, events, entities, status="todo")
 
-            # 检索历史关联
+            # 检索本地历史关联
             related = retrieve_related(entities)
 
-            # 生成建议
+            # 联网搜索（用前 3 个实体作为搜索词）
+            query = " ".join(entities[:3]) if entities else raw_input[:50]
+            web_results = await search_web(query, max_results=5)
+
+            # 生成建议（结合本地历史 + 联网结果）
             suggestion = await generate_suggestion(
                 self.client, self.settings, raw_input, entities, related,
+                web_results=web_results,
             )
             return f"📋 已记录待办\n\n{suggestion}"
         except Exception as e:

@@ -69,9 +69,10 @@ async def generate_suggestion(
     raw_input: str,
     entities: list[str],
     related_entries: list[dict],
+    web_results: list[dict] | None = None,
 ) -> str:
-    """针对用户计划，基于历史记录生成建议方案。"""
-    # 格式化历史关联记录
+    """针对用户计划，结合本地历史和联网搜索生成建议方案。"""
+    # 格式化本地历史关联记录
     if related_entries:
         lines = []
         for i, entry in enumerate(related_entries, 1):
@@ -82,6 +83,15 @@ async def generate_suggestion(
     else:
         related_text = "无相关历史记录。"
 
+    # 格式化联网搜索结果
+    if web_results:
+        lines = []
+        for i, r in enumerate(web_results, 1):
+            lines.append(f"{i}. {r['title']}\n   {r['snippet']}\n   {r['url']}")
+        web_text = "\n".join(lines)
+    else:
+        web_text = "无联网搜索结果。"
+
     response = await client.chat.completions.create(
         model=settings.model_name,
         messages=[
@@ -90,6 +100,7 @@ async def generate_suggestion(
                 raw_input=raw_input,
                 entities=", ".join(entities) if entities else "无",
                 related_text=related_text,
+                web_text=web_text,
             )},
         ],
         temperature=settings.temperature,
