@@ -34,9 +34,11 @@ def retrieve_related(
             entry.setdefault("date", file_path.stem)
             all_entries.append(entry)
 
-    # 计算交集得分，排序
+    # 计算交集得分，排序（排除今日条目）
     scored: list[tuple[int, dict]] = []
     for entry in all_entries:
+        if entry.get("date") == today:
+            continue
         entry_entities = set(e.lower().strip() for e in entry.get("entities", []))
         if not entry_entities:
             continue
