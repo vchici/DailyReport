@@ -27,6 +27,7 @@ class ReportOutline:
 class AgentState:
     raw_input: str = ""
     events: list[Event] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
     outline: ReportOutline | None = None
     report: str = ""
     error: str | None = None

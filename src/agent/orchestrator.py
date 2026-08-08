@@ -26,11 +26,11 @@ class DailyReportAgent:
         state = AgentState(raw_input=raw_input)
 
         try:
-            # Step 1: 感知 —— 从原始文本提取结构化事件
-            state.events = await parse_events(self.client, self.settings, raw_input)
+            # Step 1: 感知 —— 从原始文本提取结构化事件和实体标签
+            state.events, state.entities = await parse_events(self.client, self.settings, raw_input)
 
-            # Step 2: 持久化 —— 将本次事件存入当日文件
-            add_entry(raw_input, state.events)
+            # Step 2: 持久化 —— 将本次事件和实体存入当日文件
+            add_entry(raw_input, state.events, state.entities)
 
             # Step 3: 汇总 —— 加载当日全部历史事件
             all_events = get_all_events()

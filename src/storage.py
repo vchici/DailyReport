@@ -30,7 +30,7 @@ def save_entries(entries: list[dict], date_str: str | None = None):
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
-def add_entry(raw_input: str, events: list[Event], date_str: str | None = None) -> list[dict]:
+def add_entry(raw_input: str, events: list[Event], entities: list[str] | None = None, date_str: str | None = None) -> list[dict]:
     """添加一条新记录到当日文件，返回当日全部条目。"""
     entries = load_entries(date_str)
     entries.append({
@@ -40,6 +40,7 @@ def add_entry(raw_input: str, events: list[Event], date_str: str | None = None) 
             {"type": e.type.value, "title": e.title, "detail": e.detail, "priority": e.priority}
             for e in events
         ],
+        "entities": entities or [],
     })
     save_entries(entries, date_str)
     return entries
