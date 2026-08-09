@@ -6,7 +6,7 @@ from ..config import Settings
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
-from ..retriever import retrieve_related
+from ..retriever import retrieve_related, search_by_text
 from ..storage import add_entry, get_today_entries, load_entries
 from ..web_search import search_web
 
@@ -57,11 +57,21 @@ class DailyReportAgent:
             return "请输入你想聊的内容。"
 
         try:
-            # 提取实体标签用于检索
+            # 提取实体标签
             _, entities = await parse_events(self.client, self.settings, query)
 
-            # 检索本地历史 + 联网
-            related = retrieve_related(entities)
+            # 双路检索：实体匹配 + 全文搜索，合并去重
+            by_entity = retrieve_related(entities) if entities else []
+            by_text = search_by_text(query)
+            seen = set()
+            related: list[dict] = []
+            for entry in by_entity + by_text:
+                key = (entry.get("date"), entry.get("raw_input"))
+                if key not in seen:
+                    seen.add(key)
+                    related.append(entry)
+
+            # 联网搜索
             search_query = " ".join(entities[:3]) if entities else query[:50]
             web_results = await search_web(search_query, max_results=5)
 
