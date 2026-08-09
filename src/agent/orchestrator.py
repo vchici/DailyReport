@@ -3,7 +3,7 @@ from datetime import datetime
 from openai import AsyncOpenAI
 
 from ..config import Settings
-from ..generation.llm_engine import generate_report, generate_suggestion
+from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
 from ..retriever import retrieve_related
@@ -12,7 +12,7 @@ from ..web_search import search_web
 
 
 class DailyReportAgent:
-    """日报 Agent 主控。支持 /plan /done /report 三种操作。"""
+    """日报 Agent 主控。支持 /plan /done /report /chat 操作。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -24,20 +24,13 @@ class DailyReportAgent:
     async def plan(self, raw_input: str) -> str:
         """记录待办事项，结合本地历史和联网搜索给出建议方案。"""
         try:
-            # 解析事件和实体
             events, entities = await parse_events(self.client, self.settings, raw_input)
-
-            # 持久化为待办
             add_entry(raw_input, events, entities, status="todo")
 
-            # 检索本地历史关联
             related = retrieve_related(entities)
-
-            # 联网搜索（用前 3 个实体作为搜索词）
             query = " ".join(entities[:3]) if entities else raw_input[:50]
             web_results = await search_web(query, max_results=5)
 
-            # 生成建议（结合本地历史 + 联网结果）
             suggestion = await generate_suggestion(
                 self.client, self.settings, raw_input, entities, related,
                 web_results=web_results,
@@ -50,15 +43,34 @@ class DailyReportAgent:
         """记录已完成事项。"""
         try:
             events, entities = await parse_events(self.client, self.settings, raw_input)
-
             add_entry(raw_input, events, entities, status="done")
 
-            # 统计今日完成数
             entries = get_today_entries()
             done_count = sum(1 for e in entries if e.get("status") == "done")
             return f"✅ 已记录完成（今日共 {done_count} 项）"
         except Exception as e:
             return f"记录失败：{e}"
+
+    async def chat(self, query: str) -> str:
+        """自由对话，检索历史 + 联网搜索后回答。"""
+        if not query.strip():
+            return "请输入你想聊的内容。"
+
+        try:
+            # 提取实体标签用于检索
+            _, entities = await parse_events(self.client, self.settings, query)
+
+            # 检索本地历史 + 联网
+            related = retrieve_related(entities)
+            search_query = " ".join(entities[:3]) if entities else query[:50]
+            web_results = await search_web(search_query, max_results=5)
+
+            return await chat_response(
+                self.client, self.settings, query, related,
+                web_results=web_results,
+            )
+        except Exception as e:
+            return f"对话出错：{e}"
 
     async def generate_daily_report(self) -> str:
         """生成当日完整日报（合并待办和已完成，含历史关联发现）。"""
@@ -66,7 +78,6 @@ class DailyReportAgent:
         if not entries:
             return "今日暂无记录。"
 
-        # 汇总已完成事项的实体用于检索
         all_entities: list[str] = []
         for entry in entries:
             if entry.get("status") == "done":
@@ -84,11 +95,9 @@ class DailyReportAgent:
             return f"日报生成失败：{e}"
 
     def today_entry_count(self) -> int:
-        """获取今日已有记录条数。"""
         return len(load_entries())
 
     def today_summary(self) -> str:
-        """获取今日概况（待办/完成数量）。"""
         entries = get_today_entries()
         todo_count = sum(1 for e in entries if e.get("status") == "todo")
         done_count = sum(1 for e in entries if e.get("status") == "done")
@@ -101,5 +110,4 @@ class DailyReportAgent:
 
     @staticmethod
     def _today_str() -> str:
-        """获取今日日期字符串（YYYY-MM-DD）。"""
         return datetime.now().strftime("%Y-%m-%d")

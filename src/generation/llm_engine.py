@@ -2,6 +2,8 @@ from openai import AsyncOpenAI
 
 from ..config import Settings
 from .prompts import (
+    CHAT_SYSTEM_PROMPT,
+    CHAT_USER_PROMPT,
     PLAN_SYSTEM_PROMPT,
     PLAN_USER_PROMPT,
     REPORT_SYSTEM_PROMPT,
@@ -56,6 +58,49 @@ async def generate_report(
             {"role": "user", "content": REPORT_USER_PROMPT.format(
                 entries_text=entries_text,
                 related_text=related_text,
+            )},
+        ],
+        temperature=settings.temperature,
+    )
+    return response.choices[0].message.content or ""
+
+
+async def chat_response(
+    client: AsyncOpenAI,
+    settings: Settings,
+    user_query: str,
+    related_entries: list[dict],
+    web_results: list[dict] | None = None,
+) -> str:
+    """自由对话，结合本地历史和联网搜索回答用户问题。"""
+    # 格式化本地历史
+    if related_entries:
+        lines = []
+        for i, entry in enumerate(related_entries, 1):
+            date = entry.get("date", "未知日期")
+            raw = entry.get("raw_input", "")
+            lines.append(f"{i}. [{date}] {raw}")
+        related_text = "\n".join(lines)
+    else:
+        related_text = "无相关历史记录。"
+
+    # 格式化联网搜索
+    if web_results:
+        lines = []
+        for i, r in enumerate(web_results, 1):
+            lines.append(f"{i}. {r['title']}\n   {r['snippet']}\n   {r['url']}")
+        web_text = "\n".join(lines)
+    else:
+        web_text = "无联网搜索结果。"
+
+    response = await client.chat.completions.create(
+        model=settings.model_name,
+        messages=[
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {"role": "user", "content": CHAT_USER_PROMPT.format(
+                user_query=user_query,
+                related_text=related_text,
+                web_text=web_text,
             )},
         ],
         temperature=settings.temperature,
