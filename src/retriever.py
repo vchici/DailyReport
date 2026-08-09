@@ -20,7 +20,7 @@ def retrieve_related(
     if not query_set:
         return []
 
-    all_entries = _collect_all_entries(today)
+    all_entries = _collect_all_entries()
     return _score_and_rank(all_entries, query_set, top_k)
 
 
@@ -40,7 +40,7 @@ def search_by_text(
     # 拆成关键词，过滤太短的
     keywords = [w for w in query_lower.split() if len(w) >= 2]
 
-    all_entries = _collect_all_entries(today)
+    all_entries = _collect_all_entries()
 
     # 按关键词命中数评分
     scored: list[tuple[int, dict]] = []
@@ -54,8 +54,8 @@ def search_by_text(
     return [entry for _, entry in scored[:top_k]]
 
 
-def _collect_all_entries(today: str) -> list[dict]:
-    """收集所有历史条目（排除今日）。"""
+def _collect_all_entries() -> list[dict]:
+    """收集所有日期的全部条目。"""
     all_entries: list[dict] = []
     for file_path in sorted(DATA_DIR.glob("*.json")):
         if not file_path.stem.startswith("20"):
@@ -63,8 +63,7 @@ def _collect_all_entries(today: str) -> list[dict]:
         entries = load_entries(file_path.stem)
         for entry in entries:
             entry.setdefault("date", file_path.stem)
-            if entry.get("date") != today:
-                all_entries.append(entry)
+            all_entries.append(entry)
     return all_entries
 
 
