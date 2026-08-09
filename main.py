@@ -9,12 +9,29 @@ from src.agent.orchestrator import DailyReportAgent
 
 
 HELP_TEXT = """命令说明：
-  /plan <内容>   记录待办事项，Agent 会基于历史给出建议
-  /done <内容>   记录已完成事项
+  /plan          记录待办事项（多行输入，以单独的 . 结束）
+  /done          记录已完成事项（多行输入，以单独的 . 结束）
+  /chat <内容>   自由对话，Agent 会检索历史记录和联网信息回答
   /report        生成本日完整日报
   /status        查看今日概况
   /help          显示此帮助
   /exit          退出"""
+
+
+def read_multiline(first_line: str = "") -> str:
+    """读取多行输入，以单独的 . 行结束。"""
+    lines: list[str] = []
+    if first_line:
+        lines.append(first_line)
+    while True:
+        try:
+            line = input("  ")
+        except (EOFError, KeyboardInterrupt):
+            break
+        if line.strip() == ".":
+            break
+        lines.append(line)
+    return "\n".join(lines)
 
 
 async def main():
@@ -23,8 +40,8 @@ async def main():
 
     print("=" * 50)
     print("  日报 Agent")
-    print("  /plan 待办  |  /done 完成  |  /report 日报")
-    print("  输入 /help 查看帮助")
+    print("  /plan 待办  |  /done 完成  |  /chat 对话  |  /report 日报")
+    print("  多行输入以单独 . 结束  |  /help 查看帮助")
     print("=" * 50)
     print()
 
@@ -39,10 +56,10 @@ async def main():
             continue
 
         # 解析命令
-        if cmd_line.startswith("/plan "):
-            content = cmd_line[6:].strip()
+        if cmd_line.startswith("/plan"):
+            content = read_multiline(cmd_line.removeprefix("/plan").strip())
             if not content:
-                print("请输入计划内容，如：/plan 今天要在朴朴下单xxx菜，...\n")
+                print("内容为空，跳过。\n")
                 continue
             print("\n⏳ 正在分析...\n")
             result = await agent.plan(content)
@@ -59,13 +76,23 @@ async def main():
                 print(f"✓ 已保存到 {path}")
             print()
 
-        elif cmd_line.startswith("/done "):
-            content = cmd_line[6:].strip()
+        elif cmd_line.startswith("/done"):
+            content = read_multiline(cmd_line.removeprefix("/done").strip())
             if not content:
-                print("请输入完成内容，如：/done 看了xx电影，感觉...\n")
+                print("内容为空，跳过。\n")
                 continue
             print("\n⏳ 正在记录...\n")
             result = await agent.done(content)
+            print(result)
+            print()
+
+        elif cmd_line.startswith("/chat"):
+            content = cmd_line.removeprefix("/chat").strip()
+            if not content:
+                print("请输入你想聊的内容，如：/chat 我最近看过哪些影视作品？\n")
+                continue
+            print(f"\n⏳ 正在思考...\n")
+            result = await agent.chat(content)
             print(result)
             print()
 
