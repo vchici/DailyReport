@@ -7,21 +7,18 @@ from .storage import DATA_DIR, load_entries
 def retrieve_related(
     entities: list[str],
     top_k: int = 5,
-    today: str | None = None,
+    exclude_date: str | None = None,
 ) -> list[dict]:
     """按实体标签搜索历史记录，返回 top_k 最相关条目。"""
     if not entities:
         return []
-
-    if today is None:
-        today = datetime.now().strftime("%Y-%m-%d")
 
     query_set = set(e.lower().strip() for e in entities if e.strip())
     if not query_set:
         return []
 
     all_entries = _collect_all_entries()
-    return _score_and_rank(all_entries, query_set, top_k)
+    return _score_and_rank(all_entries, query_set, top_k, exclude_date=exclude_date)
 
 
 def search_by_text(
@@ -68,11 +65,16 @@ def _collect_all_entries() -> list[dict]:
 
 
 def _score_and_rank(
-    entries: list[dict], query_set: set[str], top_k: int,
+    entries: list[dict],
+    query_set: set[str],
+    top_k: int,
+    exclude_date: str | None = None,
 ) -> list[dict]:
     """按实体交集得分排序。"""
     scored: list[tuple[int, dict]] = []
     for entry in entries:
+        if exclude_date and entry.get("date") == exclude_date:
+            continue
         entry_entities = set(e.lower().strip() for e in entry.get("entities", []))
         if not entry_entities:
             continue

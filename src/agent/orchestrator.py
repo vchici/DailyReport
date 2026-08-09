@@ -93,7 +93,7 @@ class DailyReportAgent:
             if entry.get("status") == "done":
                 all_entities.extend(entry.get("entities", []))
 
-        related = retrieve_related(all_entities) if all_entities else []
+        related = retrieve_related(all_entities, exclude_date=self._today_str()) if all_entities else []
 
         try:
             report = await generate_report(
