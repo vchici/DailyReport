@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from .agent.state import Event, EventType
+from .agent.state import Event
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -59,21 +59,6 @@ def add_entry(
 def get_today_entries(date_str: str | None = None) -> list[dict]:
     """获取今日全部条目（含 status 字段）。"""
     return load_entries(date_str)
-
-
-def get_all_events(date_str: str | None = None) -> list[Event]:
-    """获取指定日期的全部事件（跨所有条目合并）。"""
-    entries = load_entries(date_str)
-    all_events: list[Event] = []
-    for entry in entries:
-        for e in entry.get("events", []):
-            all_events.append(Event(
-                type=EventType(e["type"]),
-                title=e["title"],
-                detail=e["detail"],
-                priority=e.get("priority", 0),
-            ))
-    return all_events
 
 
 def save_daily_report(content: str, date_str: str | None = None) -> Path:

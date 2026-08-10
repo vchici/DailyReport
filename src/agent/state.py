@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -15,20 +15,3 @@ class Event:
     title: str
     detail: str
     priority: int = 0  # 0=普通, 1=重要
-
-
-@dataclass
-class ReportOutline:
-    summary: str
-    sections: list[dict] = field(default_factory=list)
-
-
-@dataclass
-class AgentState:
-    raw_input: str = ""
-    events: list[Event] = field(default_factory=list)
-    entities: list[str] = field(default_factory=list)
-    related_entries: list[dict] = field(default_factory=list)
-    outline: ReportOutline | None = None
-    report: str = ""
-    error: str | None = None
