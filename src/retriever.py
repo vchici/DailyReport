@@ -1,7 +1,41 @@
-from datetime import datetime
-from pathlib import Path
+import re
+
+import jieba
 
 from .storage import DATA_DIR, load_entries
+
+# 中文常见停用词 + 英文单字母，分词后过滤
+_STOP_WORDS: set[str] = {
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
+    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着",
+    "没有", "看", "好", "自己", "这", "他", "她", "它", "们", "那", "些",
+    "什么", "怎么", "如何", "为什么", "可以", "这个", "那个", "所以",
+    "a", "an", "the", "is", "are", "was", "were", "be", "been",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from",
+    "and", "or", "but", "not", "no", "if", "so", "as", "it",
+    "this", "that", "these", "those", "i", "we", "you", "he", "she",
+}
+
+
+def _tokenize(text: str) -> list[str]:
+    """用 jieba 分词，去停用词和单字、标点，返回归一化词列表。"""
+    # 先对纯英文/数字片段做保护（保留大小写原始值给 lower 统一处理），
+    # jieba 对中英混排直接 cut 即可
+    words: list[str] = []
+    for w in jieba.cut(text):
+        w = w.strip().lower()
+        if not w:
+            continue
+        # 过滤纯标点/空白、单字符（英文单字母）、停用词
+        if len(w) < 2:
+            continue
+        if re.fullmatch(r"[\W_]+", w):
+            continue
+        if w in _STOP_WORDS:
+            continue
+        words.append(w)
+    # 去重保留顺序无关紧要，但保留重复词不影响 set 交集
+    return words
 
 
 def retrieve_related(
@@ -24,26 +58,29 @@ def retrieve_related(
 def search_by_text(
     query: str,
     top_k: int = 5,
-    today: str | None = None,
 ) -> list[dict]:
-    """全文搜索所有条目的 raw_input 文本，不依赖实体标签。"""
+    """全文搜索所有条目的 raw_input 文本，不依赖实体标签。
+
+    使用 jieba 分词，同时对 query 和每条记录的 raw_input 做分词，
+    以词集交集大小作为相关性得分，天然支持中英混排场景。
+    """
     if not query.strip():
         return []
 
-    if today is None:
-        today = datetime.now().strftime("%Y-%m-%d")
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return []
 
-    query_lower = query.lower()
-    # 拆成关键词，过滤太短的
-    keywords = [w for w in query_lower.split() if len(w) >= 2]
-
+    query_set = set(query_tokens)
     all_entries = _collect_all_entries()
 
-    # 按关键词命中数评分
     scored: list[tuple[int, dict]] = []
     for entry in all_entries:
-        raw = entry.get("raw_input", "").lower()
-        score = sum(1 for kw in keywords if kw in raw)
+        raw = entry.get("raw_input", "")
+        raw_tokens = _tokenize(raw)
+        if not raw_tokens:
+            continue
+        score = len(query_set & set(raw_tokens))
         if score > 0:
             scored.append((score, entry))
 
