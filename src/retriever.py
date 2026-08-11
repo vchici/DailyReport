@@ -2,7 +2,7 @@ import re
 
 import jieba
 
-from .storage import DATA_DIR, load_entries
+from .storage import DATA_DIR, load_entries, save_entries
 
 # 中文常见停用词 + 英文单字母，分词后过滤
 _STOP_WORDS: set[str] = {
@@ -76,8 +76,7 @@ def search_by_text(
 
     scored: list[tuple[int, dict]] = []
     for entry in all_entries:
-        raw = entry.get("raw_input", "")
-        raw_tokens = _tokenize(raw)
+        raw_tokens = entry.get("_tokens", [])
         if not raw_tokens:
             continue
         score = len(query_set & set(raw_tokens))
@@ -89,15 +88,25 @@ def search_by_text(
 
 
 def _collect_all_entries() -> list[dict]:
-    """收集所有日期的全部条目。"""
+    """收集所有日期的全部条目，按需分词并持久化缓存到 JSON 文件。
+
+    已有 _tokens 的条目直接复用；新增/未分词的条目在分词后
+    写回对应日期文件，后续加载不再重复分词。
+    """
     all_entries: list[dict] = []
     for file_path in sorted(DATA_DIR.glob("*.json")):
         if not file_path.stem.startswith("20"):
             continue
         entries = load_entries(file_path.stem)
+        needs_save = False
         for entry in entries:
             entry.setdefault("date", file_path.stem)
+            if "_tokens" not in entry:
+                entry["_tokens"] = _tokenize(entry.get("raw_input", ""))
+                needs_save = True
             all_entries.append(entry)
+        if needs_save:
+            save_entries(entries, file_path.stem)
     return all_entries
 
 
