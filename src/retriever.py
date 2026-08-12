@@ -19,14 +19,11 @@ _STOP_WORDS: set[str] = {
 
 def _tokenize(text: str) -> list[str]:
     """用 jieba 分词，去停用词和单字、标点，返回归一化词列表。"""
-    # 先对纯英文/数字片段做保护（保留大小写原始值给 lower 统一处理），
-    # jieba 对中英混排直接 cut 即可
     words: list[str] = []
     for w in jieba.cut(text):
         w = w.strip().lower()
         if not w:
             continue
-        # 过滤纯标点/空白、单字符（英文单字母）、停用词
         if len(w) < 2:
             continue
         if re.fullmatch(r"[\W_]+", w):
@@ -34,7 +31,6 @@ def _tokenize(text: str) -> list[str]:
         if w in _STOP_WORDS:
             continue
         words.append(w)
-    # 去重保留顺序无关紧要，但保留重复词不影响 set 交集
     return words
 
 
@@ -43,48 +39,45 @@ def retrieve_related(
     top_k: int = 5,
     exclude_date: str | None = None,
 ) -> list[dict]:
-    """按实体标签搜索历史记录，返回 top_k 最相关条目。"""
+    """按实体标签搜索历史记录，返回 top_k 最相关条目。
+
+    entities 来自 LLM 从用户输入中提取的概念词。
+    检索时同时用原始标签和分词结果匹配，加权打分。
+    """
     if not entities:
         return []
 
-    query_set = set(e.lower().strip() for e in entities if e.strip())
-    if not query_set:
+    # 同时保留原始标签（精确概念匹配）和分词结果（宽泛词级匹配）
+    query_tokens: set[str] = set()
+    for e in entities:
+        e_lower = e.lower().strip()
+        if not e_lower:
+            continue
+        query_tokens.add(e_lower)
+        query_tokens.update(_tokenize(e_lower))
+
+    if not query_tokens:
         return []
 
-    all_entries = _collect_all_entries()
-    return _score_and_rank(all_entries, query_set, top_k, exclude_date=exclude_date)
+    return _retrieve(_collect_all_entries(), query_tokens, top_k, exclude_date)
 
 
 def search_by_text(
     query: str,
     top_k: int = 5,
 ) -> list[dict]:
-    """全文搜索所有条目的 raw_input 文本，不依赖实体标签。
+    """全文搜索所有条目的 raw_input 文本。
 
-    使用 jieba 分词，同时对 query 和每条记录的 raw_input 做分词，
-    以词集交集大小作为相关性得分，天然支持中英混排场景。
+    query 来自用户原始输入语句，分词后做加权两阶段检索。
     """
     if not query.strip():
         return []
 
-    query_tokens = _tokenize(query)
+    query_tokens = set(_tokenize(query))
     if not query_tokens:
         return []
 
-    query_set = set(query_tokens)
-    all_entries = _collect_all_entries()
-
-    scored: list[tuple[int, dict]] = []
-    for entry in all_entries:
-        raw_tokens = entry.get("_tokens", [])
-        if not raw_tokens:
-            continue
-        score = len(query_set & set(raw_tokens))
-        if score > 0:
-            scored.append((score, entry))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [entry for _, entry in scored[:top_k]]
+    return _retrieve(_collect_all_entries(), query_tokens, top_k)
 
 
 def _collect_all_entries() -> list[dict]:
@@ -110,22 +103,31 @@ def _collect_all_entries() -> list[dict]:
     return all_entries
 
 
-def _score_and_rank(
+def _retrieve(
     entries: list[dict],
-    query_set: set[str],
+    query_tokens: set[str],
     top_k: int,
     exclude_date: str | None = None,
 ) -> list[dict]:
-    """按实体交集得分排序。"""
+    """统一的加权两阶段检索。
+
+    第一阶段 query_tokens × entities —— 概念级匹配，2倍权重
+    第二阶段 query_tokens × _tokens —— 词级匹配，1倍权重
+    加权总分排序后返回 top_k。
+    """
     scored: list[tuple[int, dict]] = []
     for entry in entries:
         if exclude_date and entry.get("date") == exclude_date:
             continue
+        # 第一阶段：与条目的 entity 标签做交集
         entry_entities = set(e.lower().strip() for e in entry.get("entities", []))
-        if not entry_entities:
-            continue
-        overlap = len(query_set & entry_entities)
-        if overlap > 0:
-            scored.append((overlap, entry))
+        entity_hits = len(query_tokens & entry_entities)
+        # 第二阶段：与条目的 _tokens 做交集
+        token_hits = len(query_tokens & set(entry.get("_tokens", [])))
+
+        score = entity_hits * 2 + token_hits
+        if score > 0:
+            scored.append((score, entry))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     return [entry for _, entry in scored[:top_k]]
