@@ -39,6 +39,15 @@ async def generate_report(
         parts.append("### 待办\n" + "\n".join(todo_lines))
     entries_text = "\n\n".join(parts) if parts else "今日无记录。"
 
+    # 提取结构化匹配对：done 条目中已记录的 matched_todos
+    matched_parts: list[str] = []
+    for entry in entries:
+        if entry.get("status") == "done" and entry.get("matched_todos"):
+            done_text = entry["raw_input"]
+            for todo_text in entry["matched_todos"]:
+                matched_parts.append(f"- 「{done_text}」✅ 对应待办「{todo_text}」")
+    matched_text = "\n".join(matched_parts) if matched_parts else ""
+
     # 格式化历史关联记录
     if related_entries:
         lines = ["\n## 历史相关记录"]
@@ -57,6 +66,7 @@ async def generate_report(
             {"role": "system", "content": REPORT_SYSTEM_PROMPT},
             {"role": "user", "content": REPORT_USER_PROMPT.format(
                 entries_text=entries_text,
+                matched_text=matched_text,
                 related_text=related_text,
             )},
         ],

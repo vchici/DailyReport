@@ -5,8 +5,8 @@ from openai import AsyncOpenAI
 from ..config import Settings
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..perception.text_parser import parse_events
-from ..retriever import retrieve_related, search_by_text
-from ..storage import add_entry, load_entries
+from ..retriever import match_done_to_todos, retrieve_related, search_by_text
+from ..storage import add_entry, load_entries, save_entries
 from ..web_search import search_web
 
 
@@ -39,14 +39,26 @@ class DailyReportAgent:
             return f"记录失败：{e}"
 
     async def done(self, raw_input: str) -> str:
-        """记录已完成事项。"""
+        """记录已完成事项，自动匹配当日待办并建立关联。"""
         try:
             events, entities = await parse_events(self.client, self.settings, raw_input)
-            add_entry(raw_input, events, entities, status="done")
+            entries = add_entry(raw_input, events, entities, status="done")
 
-            entries = load_entries()
+            # 匹配当日待办：用 done 的实体标签对比 todo 条目
+            todos = [e for e in entries if e.get("status") == "todo"]
+            matched = match_done_to_todos(entities, todos)
+
+            if matched:
+                # 将匹配关系写入 done 条目
+                entries[-1]["matched_todos"] = [t["raw_input"] for t in matched]
+                save_entries(entries)
+
             done_count = sum(1 for e in entries if e.get("status") == "done")
-            return f"✅ 已记录完成（今日共 {done_count} 项）"
+            msg = f"✅ 已记录完成（今日共 {done_count} 项）"
+            if matched:
+                names = "、".join(t["raw_input"][:30] for t in matched)
+                msg += f"\n🔗 匹配待办：{names}"
+            return msg
         except Exception as e:
             return f"记录失败：{e}"
 

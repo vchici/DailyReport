@@ -174,3 +174,49 @@ def _retrieve(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [entry for _, entry in scored[:top_k]]
+
+
+def match_done_to_todos(
+    done_entities: list[str],
+    todos: list[dict],
+    threshold: int = 1,
+) -> list[dict]:
+    """用实体标签匹配已完成事项到当日待办，返回命中的待办列表。
+
+    复用与检索相同的加权两阶段算法：
+    - 第一阶段：done_entities × todo.entities（精确概念匹配，2倍权重）
+    - 第二阶段：分词结果匹配（宽泛词级匹配，1倍权重）
+    - 加权总分 >= threshold 即视为匹配
+    """
+    if not done_entities or not todos:
+        return []
+
+    # 构建查询 token 集合（和 retrieve_related 一致）
+    query_tokens: set[str] = set()
+    for e in done_entities:
+        e_lower = e.lower().strip()
+        if not e_lower:
+            continue
+        query_tokens.add(e_lower)
+        query_tokens.update(_tokenize(e_lower))
+
+    if not query_tokens:
+        return []
+
+    # 对每个待办条目打分
+    scored: list[tuple[int, dict]] = []
+    for todo in todos:
+        todo_entities = set(e.lower().strip() for e in todo.get("entities", []))
+        entity_hits = len(query_tokens & todo_entities)
+
+        # 对待办做即时分词（待办数据量小，无需全局缓存）
+        if "_tokens" not in todo:
+            todo["_tokens"] = _tokenize(todo.get("raw_input", ""))
+        token_hits = len(query_tokens & set(todo.get("_tokens", [])))
+
+        score = entity_hits * 2 + token_hits
+        if score >= threshold:
+            scored.append((score, todo))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [todo for _, todo in scored]
