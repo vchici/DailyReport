@@ -4,7 +4,6 @@ from openai import AsyncOpenAI
 
 from ..config import Settings
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
-from ..generation.renderer import render_report
 from ..perception.text_parser import parse_events
 from ..retriever import retrieve_related, search_by_text
 from ..storage import add_entry, get_today_entries, load_entries
@@ -90,8 +89,7 @@ class DailyReportAgent:
 
         all_entities: list[str] = []
         for entry in entries:
-            if entry.get("status") == "done":
-                all_entities.extend(entry.get("entities", []))
+            all_entities.extend(entry.get("entities", []))
 
         related = retrieve_related(all_entities, exclude_date=self._today_str()) if all_entities else []
 
@@ -100,7 +98,7 @@ class DailyReportAgent:
                 self.client, self.settings, entries,
                 related_entries=related,
             )
-            return render_report(report)
+            return report
         except Exception as e:
             return f"日报生成失败：{e}"
 

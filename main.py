@@ -1,8 +1,4 @@
 import asyncio
-import sys
-
-# 添加第三方包路径（sandbox 环境兼容）
-sys.path.insert(0, r"d:\Projects\KnowledgeBase\.packages")
 
 from src.config import Settings
 from src.agent.orchestrator import DailyReportAgent
