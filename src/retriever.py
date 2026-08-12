@@ -1,4 +1,7 @@
+import json
 import re
+from pathlib import Path
+from typing import Optional
 
 import jieba
 
@@ -15,6 +18,13 @@ _STOP_WORDS: set[str] = {
     "and", "or", "but", "not", "no", "if", "so", "as", "it",
     "this", "that", "these", "those", "i", "we", "you", "he", "she",
 }
+
+# 内存缓存：本次进程生命周期内命中
+_cache_mtimes: dict[str, float] = {}
+_cache_entries: Optional[list[dict]] = None
+
+# 磁盘持久化缓存：跨进程/重启后命中
+_INDEX_CACHE_PATH = DATA_DIR / "_index_cache.json"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -81,15 +91,41 @@ def search_by_text(
 
 
 def _collect_all_entries() -> list[dict]:
-    """收集所有日期的全部条目，按需分词并持久化缓存到 JSON 文件。
+    """收集所有日期的全部条目，两层缓存：内存 + 磁盘。
 
-    已有 _tokens 的条目直接复用；新增/未分词的条目在分词后
-    写回对应日期文件，后续加载不再重复分词。
+    1. 内存缓存命中 → 直接返回（同进程内最快）
+    2. 磁盘缓存命中 → 加载 _index_cache.json（跨重启）
+    3. 缓存失效 → 全量重建，并同时写回磁盘缓存
     """
-    all_entries: list[dict] = []
+    global _cache_mtimes, _cache_entries
+
+    # ── 先收集当前所有 JSON 文件的 mtime ──
+    current_mtimes: dict[str, float] = {}
     for file_path in sorted(DATA_DIR.glob("*.json")):
         if not file_path.stem.startswith("20"):
             continue
+        current_mtimes[str(file_path)] = file_path.stat().st_mtime
+
+    # ── 第一层：内存缓存（同进程内的瞬时命中）──
+    if _cache_entries is not None and current_mtimes == _cache_mtimes:
+        return _cache_entries
+
+    # ── 第二层：磁盘持久化缓存（跨重启命中）──
+    if _INDEX_CACHE_PATH.exists():
+        try:
+            with open(_INDEX_CACHE_PATH, "r", encoding="utf-8") as f:
+                disk = json.load(f)
+            if disk.get("mtimes") == current_mtimes:
+                _cache_mtimes = current_mtimes
+                _cache_entries = disk["entries"]
+                return _cache_entries
+        except (json.JSONDecodeError, KeyError):
+            pass  # 缓存文件损坏，降级重建
+
+    # ── 缓存未命中，全量重建 ──
+    all_entries: list[dict] = []
+    for file_path_str in sorted(current_mtimes):
+        file_path = Path(file_path_str) if file_path_str.startswith("/") else DATA_DIR / file_path_str
         entries = load_entries(file_path.stem)
         needs_save = False
         for entry in entries:
@@ -100,6 +136,13 @@ def _collect_all_entries() -> list[dict]:
             all_entries.append(entry)
         if needs_save:
             save_entries(entries, file_path.stem)
+
+    # 写回两层缓存
+    _cache_mtimes = current_mtimes
+    _cache_entries = all_entries
+    with open(_INDEX_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump({"mtimes": current_mtimes, "entries": all_entries}, f, ensure_ascii=False)
+
     return all_entries
 
 

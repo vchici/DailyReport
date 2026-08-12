@@ -56,11 +56,6 @@ def add_entry(
     return entries
 
 
-def get_today_entries(date_str: str | None = None) -> list[dict]:
-    """获取今日全部条目（含 status 字段）。"""
-    return load_entries(date_str)
-
-
 def save_daily_report(content: str, date_str: str | None = None) -> Path:
     """将日报保存为 Markdown 文件，返回保存路径。"""
     if date_str is None:

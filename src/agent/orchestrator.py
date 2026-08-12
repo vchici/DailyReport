@@ -6,7 +6,7 @@ from ..config import Settings
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..perception.text_parser import parse_events
 from ..retriever import retrieve_related, search_by_text
-from ..storage import add_entry, get_today_entries, load_entries
+from ..storage import add_entry, load_entries
 from ..web_search import search_web
 
 
@@ -44,7 +44,7 @@ class DailyReportAgent:
             events, entities = await parse_events(self.client, self.settings, raw_input)
             add_entry(raw_input, events, entities, status="done")
 
-            entries = get_today_entries()
+            entries = load_entries()
             done_count = sum(1 for e in entries if e.get("status") == "done")
             return f"✅ 已记录完成（今日共 {done_count} 项）"
         except Exception as e:
@@ -83,7 +83,7 @@ class DailyReportAgent:
 
     async def generate_daily_report(self) -> str:
         """生成当日完整日报（合并待办和已完成，含历史关联发现）。"""
-        entries = get_today_entries()
+        entries = load_entries()
         if not entries:
             return "今日暂无记录。"
 
@@ -106,7 +106,7 @@ class DailyReportAgent:
         return len(load_entries())
 
     def today_summary(self) -> str:
-        entries = get_today_entries()
+        entries = load_entries()
         todo_count = sum(1 for e in entries if e.get("status") == "todo")
         done_count = sum(1 for e in entries if e.get("status") == "done")
         parts = []
