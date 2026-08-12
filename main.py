@@ -1,4 +1,5 @@
 import asyncio
+import readline  # 启用 GNU readline 行编辑，修复 CJK 回撤输入错乱
 
 from src.config import Settings
 from src.agent.orchestrator import DailyReportAgent
