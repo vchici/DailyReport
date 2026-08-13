@@ -2,3 +2,4 @@
 /.env
 **__pycache__**
 data/_index_cache.json
+*.egg-info/
