@@ -1,4 +1,3 @@
-import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -29,9 +28,6 @@ _cache_entries: Optional[list[dict]] = None
 # 倒排索引：token/entity → 条目下标集合，避免检索时全量扫描
 _entity_index: dict[str, set[int]] = {}
 _token_index: dict[str, set[int]] = {}
-
-# 磁盘持久化缓存：跨进程/重启后命中
-_INDEX_CACHE_PATH = DATA_DIR / "_index_cache.json"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -115,11 +111,10 @@ def _build_inverted_index(entries: list[dict]) -> None:
 
 
 def _collect_all_entries() -> list[dict]:
-    """收集所有日期的全部条目，两层缓存：内存 + 磁盘。
+    """收集所有日期的全部条目，并同步构建倒排索引。
 
-    1. 内存缓存命中 → 直接返回（同进程内最快）
-    2. 磁盘缓存命中 → 加载 _index_cache.json（跨重启）
-    3. 缓存失效 → 全量重建，并同时写回磁盘缓存
+    用文件 mtime 做内存缓存：同进程内数据未变则直接命中，
+    否则重新读取所有日期 JSON（_tokens 已持久化，无需重复分词）。
     """
     global _cache_mtimes, _cache_entries
 
@@ -130,24 +125,11 @@ def _collect_all_entries() -> list[dict]:
             continue
         current_mtimes[str(file_path)] = file_path.stat().st_mtime
 
-    # ── 第一层：内存缓存（同进程内的瞬时命中）──
+    # ── 内存缓存命中：同进程内数据未变，直接返回 ──
     if _cache_entries is not None and current_mtimes == _cache_mtimes:
         return _cache_entries
 
-    # ── 第二层：磁盘持久化缓存（跨重启命中）──
-    if _INDEX_CACHE_PATH.exists():
-        try:
-            with open(_INDEX_CACHE_PATH, "r", encoding="utf-8") as f:
-                disk = json.load(f)
-            if disk.get("mtimes") == current_mtimes:
-                _cache_mtimes = current_mtimes
-                _cache_entries = disk["entries"]
-                _build_inverted_index(_cache_entries)
-                return _cache_entries
-        except (json.JSONDecodeError, KeyError):
-            pass  # 缓存文件损坏，降级重建
-
-    # ── 缓存未命中，全量重建 ──
+    # ── 缓存失效，重新读取所有日期文件 ──
     all_entries: list[dict] = []
     for file_path_str in sorted(current_mtimes):
         file_path = Path(file_path_str) if file_path_str.startswith("/") else DATA_DIR / file_path_str
@@ -162,12 +144,10 @@ def _collect_all_entries() -> list[dict]:
         if needs_save:
             save_entries(entries, file_path.stem)
 
-    # 写回两层缓存
+    # 更新内存缓存并重建倒排索引
     _cache_mtimes = current_mtimes
     _cache_entries = all_entries
     _build_inverted_index(all_entries)
-    with open(_INDEX_CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump({"mtimes": current_mtimes, "entries": all_entries}, f, ensure_ascii=False)
 
     return all_entries
 
