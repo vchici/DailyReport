@@ -38,6 +38,7 @@ async def main():
     print("=" * 50)
     print("  日报 Agent")
     print("  /plan 待办  |  /done 完成  |  /chat 对话  |  /report 日报")
+    print("  也可直接输入自然语言，AI 会自动识别意图")
     print("  多行输入以单独 . 结束  |  /help 查看帮助")
     print("=" * 50)
     print()
@@ -127,8 +128,11 @@ async def main():
             break
 
         else:
-            print(f"未知命令：{cmd_line}")
-            print(f"可用命令：/plan /done /report /status /help /exit\n")
+            # 非 / 开头 → 自然语言输入，自动识别意图
+            print(f"\n⏳ 正在理解...\n")
+            result = await agent.auto_dispatch(cmd_line)
+            print(result)
+            print()
 
 
 if __name__ == "__main__":

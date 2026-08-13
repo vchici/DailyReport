@@ -7,6 +7,9 @@ import jieba
 
 from .storage import DATA_DIR, load_entries, save_entries
 
+# 关闭 jieba 的词典加载日志（Building prefix dict 那几行噪音）
+jieba.setLogLevel(20)
+
 # 中文常见停用词 + 英文单字母，分词后过滤
 _STOP_WORDS: set[str] = {
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",

@@ -8,10 +8,11 @@ from ..perception.text_parser import parse_events
 from ..retriever import match_done_to_todos, retrieve_related, search_by_text
 from ..storage import add_entry, load_entries, save_entries
 from ..web_search import search_web
+from .state import Event
 
 
 class DailyReportAgent:
-    """日报 Agent 主控。支持 /plan /done /report /chat 操作。"""
+    """日报 Agent 主控。支持 /plan /done /report /chat 操作，也支持自然语言自动识别。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -20,10 +21,34 @@ class DailyReportAgent:
             base_url=settings.openai_base_url,
         )
 
-    async def plan(self, raw_input: str) -> str:
+    # ── 自然语言入口 ──
+
+    async def auto_dispatch(self, raw_input: str) -> str:
+        """自动识别自然语言输入的意图并分发到对应处理函数。"""
+        try:
+            intent, events, entities = await parse_events(self.client, self.settings, raw_input)
+
+            if intent == "plan":
+                return await self.plan(raw_input, events, entities)
+            elif intent == "done":
+                return await self.done(raw_input, events, entities)
+            elif intent == "chat":
+                return await self.chat(raw_input, entities)
+            elif intent == "report":
+                return await self.generate_daily_report()
+            else:
+                # 未能识别意图，默认按对话处理
+                return await self.chat(raw_input)
+        except Exception as e:
+            return f"处理失败：{e}"
+
+    # ── 命令处理（接受可选的预解析参数，避免 auto_dispatch 重复调用 LLM）──
+
+    async def plan(self, raw_input: str, events: list[Event] | None = None, entities: list[str] | None = None) -> str:
         """记录待办事项，结合本地历史和联网搜索给出建议方案。"""
         try:
-            events, entities = await parse_events(self.client, self.settings, raw_input)
+            if events is None or entities is None:
+                _, events, entities = await parse_events(self.client, self.settings, raw_input)
             add_entry(raw_input, events, entities, status="todo")
 
             related = retrieve_related(entities)
@@ -38,10 +63,11 @@ class DailyReportAgent:
         except Exception as e:
             return f"记录失败：{e}"
 
-    async def done(self, raw_input: str) -> str:
+    async def done(self, raw_input: str, events: list[Event] | None = None, entities: list[str] | None = None) -> str:
         """记录已完成事项，自动匹配当日待办并建立关联。"""
         try:
-            events, entities = await parse_events(self.client, self.settings, raw_input)
+            if events is None or entities is None:
+                _, events, entities = await parse_events(self.client, self.settings, raw_input)
             entries = add_entry(raw_input, events, entities, status="done")
 
             # 匹配当日待办：用 done 的实体标签对比 todo 条目
@@ -62,14 +88,15 @@ class DailyReportAgent:
         except Exception as e:
             return f"记录失败：{e}"
 
-    async def chat(self, query: str) -> str:
+    async def chat(self, query: str, entities: list[str] | None = None) -> str:
         """自由对话，检索历史 + 联网搜索后回答。"""
         if not query.strip():
             return "请输入你想聊的内容。"
 
         try:
-            # 提取实体标签
-            _, entities = await parse_events(self.client, self.settings, query)
+            if entities is None:
+                # 提取实体标签
+                _, _, entities = await parse_events(self.client, self.settings, query)
 
             # 双路检索：实体匹配 + 全文搜索，合并去重
             by_entity = retrieve_related(entities) if entities else []
