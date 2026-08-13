@@ -26,6 +26,10 @@ _STOP_WORDS: set[str] = {
 _cache_mtimes: dict[str, float] = {}
 _cache_entries: Optional[list[dict]] = None
 
+# 倒排索引：token/entity → 条目下标集合，避免检索时全量扫描
+_entity_index: dict[str, set[int]] = {}
+_token_index: dict[str, set[int]] = {}
+
 # 磁盘持久化缓存：跨进程/重启后命中
 _INDEX_CACHE_PATH = DATA_DIR / "_index_cache.json"
 
@@ -93,6 +97,23 @@ def search_by_text(
     return _retrieve(_collect_all_entries(), query_tokens, top_k)
 
 
+def _build_inverted_index(entries: list[dict]) -> None:
+    """根据条目列表构建倒排索引（entity 与 token 两套）。"""
+    global _entity_index, _token_index
+
+    entity_index: dict[str, set[int]] = {}
+    token_index: dict[str, set[int]] = {}
+    for idx, entry in enumerate(entries):
+        for e in entry.get("entities", []):
+            e_lower = e.lower().strip()
+            if e_lower:
+                entity_index.setdefault(e_lower, set()).add(idx)
+        for t in entry.get("_tokens", []):
+            token_index.setdefault(t, set()).add(idx)
+    _entity_index = entity_index
+    _token_index = token_index
+
+
 def _collect_all_entries() -> list[dict]:
     """收集所有日期的全部条目，两层缓存：内存 + 磁盘。
 
@@ -121,6 +142,7 @@ def _collect_all_entries() -> list[dict]:
             if disk.get("mtimes") == current_mtimes:
                 _cache_mtimes = current_mtimes
                 _cache_entries = disk["entries"]
+                _build_inverted_index(_cache_entries)
                 return _cache_entries
         except (json.JSONDecodeError, KeyError):
             pass  # 缓存文件损坏，降级重建
@@ -143,6 +165,7 @@ def _collect_all_entries() -> list[dict]:
     # 写回两层缓存
     _cache_mtimes = current_mtimes
     _cache_entries = all_entries
+    _build_inverted_index(all_entries)
     with open(_INDEX_CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump({"mtimes": current_mtimes, "entries": all_entries}, f, ensure_ascii=False)
 
@@ -155,28 +178,29 @@ def _retrieve(
     top_k: int,
     exclude_date: str | None = None,
 ) -> list[dict]:
-    """统一的加权两阶段检索。
+    """统一的加权两阶段检索（倒排索引加速）。
 
     第一阶段 query_tokens × entities —— 概念级匹配，2倍权重
     第二阶段 query_tokens × _tokens —— 词级匹配，1倍权重
     加权总分排序后返回 top_k。
+
+    通过全局倒排索引定位候选条目，避免全量扫描。
+    entries 必须是 _collect_all_entries() 的返回值，
+    其下标与倒排索引中的下标一一对应。
     """
-    scored: list[tuple[int, dict]] = []
-    for entry in entries:
-        if exclude_date and entry.get("date") == exclude_date:
-            continue
-        # 第一阶段：与条目的 entity 标签做交集
-        entry_entities = set(e.lower().strip() for e in entry.get("entities", []))
-        entity_hits = len(query_tokens & entry_entities)
-        # 第二阶段：与条目的 _tokens 做交集
-        token_hits = len(query_tokens & set(entry.get("_tokens", [])))
+    scores: dict[int, int] = {}
+    for qt in query_tokens:
+        for idx in _entity_index.get(qt, ()):
+            if exclude_date and entries[idx].get("date") == exclude_date:
+                continue
+            scores[idx] = scores.get(idx, 0) + 2
+        for idx in _token_index.get(qt, ()):
+            if exclude_date and entries[idx].get("date") == exclude_date:
+                continue
+            scores[idx] = scores.get(idx, 0) + 1
 
-        score = entity_hits * 2 + token_hits
-        if score > 0:
-            scored.append((score, entry))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [entry for _, entry in scored[:top_k]]
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [entries[idx] for idx, _ in ranked[:top_k]]
 
 
 def match_done_to_todos(
