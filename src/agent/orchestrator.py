@@ -14,12 +14,18 @@ from .state import Event
 class DailyReportAgent:
     """日报 Agent 主控。支持 /plan /done /report /chat 操作，也支持自然语言自动识别。"""
 
+    # 多轮对话保留的消息条数上限（user/assistant 各算一条，即 5 轮）。
+    # 仅按"上下文对注意力的影响"权衡：过长历史会稀释模型对当前问题的聚焦。
+    MAX_CHAT_HISTORY = 16
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
         )
+        # 多轮对话历史（user/assistant 交替），仅本次运行内有效
+        self.chat_history: list[dict[str, str]] = []
 
     # ── 自然语言入口 ──
 
@@ -113,10 +119,19 @@ class DailyReportAgent:
             search_query = " ".join(entities[:3]) if entities else query[:50]
             web_results = await search_web(search_query, max_results=5)
 
-            return await chat_response(
+            response = await chat_response(
                 self.client, self.settings, query, related,
                 web_results=web_results,
+                history=self.chat_history,
             )
+
+            # 追加本轮对话到历史，超出上限则丢弃最旧的
+            self.chat_history.append({"role": "user", "content": query})
+            self.chat_history.append({"role": "assistant", "content": response})
+            if len(self.chat_history) > self.MAX_CHAT_HISTORY:
+                self.chat_history = self.chat_history[-self.MAX_CHAT_HISTORY:]
+
+            return response
         except Exception as e:
             return f"对话出错：{e}"
 

@@ -81,8 +81,12 @@ async def chat_response(
     user_query: str,
     related_entries: list[dict],
     web_results: list[dict] | None = None,
+    history: list[dict] | None = None,
 ) -> str:
-    """自由对话，结合本地历史和联网搜索回答用户问题。"""
+    """自由对话，结合本地历史、联网搜索和多轮对话上下文回答用户问题。
+
+    history 为之前的对话记录（user/assistant 交替），用于多轮记忆。
+    """
     # 格式化本地历史
     if related_entries:
         lines = []
@@ -103,16 +107,21 @@ async def chat_response(
     else:
         web_text = "无联网搜索结果。"
 
+    messages: list[dict] = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    if history:
+        messages.extend(history)
+    messages.append({
+        "role": "user",
+        "content": CHAT_USER_PROMPT.format(
+            user_query=user_query,
+            related_text=related_text,
+            web_text=web_text,
+        ),
+    })
+
     response = await client.chat.completions.create(
         model=settings.model_name,
-        messages=[
-            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
-            {"role": "user", "content": CHAT_USER_PROMPT.format(
-                user_query=user_query,
-                related_text=related_text,
-                web_text=web_text,
-            )},
-        ],
+        messages=messages,
         temperature=settings.temperature,
     )
     return response.choices[0].message.content or ""
