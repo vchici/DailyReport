@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "jieba>=0.42",
     "ddgs>=7.0.0",
+    "rich>=13.0.0",
 ]
 
 [project.scripts]

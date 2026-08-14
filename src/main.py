@@ -1,8 +1,20 @@
 import asyncio
 import readline  # 启用 GNU readline 行编辑，修复 CJK 回撤输入错乱
+import time
+from datetime import datetime
+
+from rich.align import Align
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from .config import Settings
 from .agent.orchestrator import DailyReportAgent
+
+
+console = Console()
 
 
 HELP_TEXT = """命令说明：
@@ -31,17 +43,76 @@ def read_multiline(first_line: str = "") -> str:
     return "\n".join(lines)
 
 
+def _animate_intro() -> None:
+    """进场动画：日期数字跳动 → 平滑过渡为「日期标题 + 命令面板」主界面。"""
+
+    now = datetime.now()
+
+    rows = [
+        ("/plan", "记录待办事项（多行，以单独 . 结束）", None),
+        ("/done", "记录已完成事项", None),
+        ("/chat", "自由对话，检索历史 + 联网信息", None),
+        ("/report", "生成本日完整日报", None),
+        ("/status", "查看今日概况", None),
+        ("/help", "显示帮助  |  /exit 退出", None),
+        ("", "", None),
+        ("→", "直接输入自然语言，AI 会自动识别意图", "italic"),
+    ]
+
+    def _date(day: int) -> Text:
+        label = f"{now.month:02d}/{day:02d}/{now.year % 100:02d}"
+        left_pad = max(0, (console.width - len(label)) // 2)
+        return Text(" " * left_pad + label, style="bold yellow")
+
+    def _panel(visible: int, border_style: str = "bold cyan") -> Align:
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column(style="bold cyan", width=10)
+        table.add_column(style="dim")
+        for i, (cmd, desc, style) in enumerate(rows):
+            if i < visible:
+                if style:
+                    table.add_row(cmd, desc, style=style)
+                else:
+                    table.add_row(cmd, desc)
+            else:
+                table.add_row("", "")  # 占位，保持面板高度稳定
+        panel = Panel(
+            table,
+            title="[bold]Daily Report[/bold]",
+            title_align="center",
+            subtitle="[dim]AI 驱动的个人日报助手[/dim]",
+            border_style=border_style,
+            padding=(1, 2),
+        )
+        return Align.center(panel)
+
+    with Live(console=console, refresh_per_second=30, auto_refresh=False) as live:
+        # 1) 日期数字跳动
+        for d in range(1, now.day + 1):
+            live.update(_date(d))
+            live.refresh()
+            time.sleep(0.05)
+
+        # 2) 平滑过渡：命令面板外框在日期下方淡入
+        for border in ("dim cyan", "cyan"):
+            live.update(Group(_date(now.day), _panel(0, border)))
+            live.refresh()
+            time.sleep(0.09)
+
+        # 3) 内容逐行揭示，日期保留为标题栏
+        for visible in range(1, len(rows) + 1):
+            live.update(Group(_date(now.day), _panel(visible)))
+            live.refresh()
+            time.sleep(0.05)
+
+    console.print()
+
+
 async def _run() -> None:
     settings = Settings()
     agent = DailyReportAgent(settings)
 
-    print("=" * 50)
-    print("  日报 Agent")
-    print("  /plan 待办  |  /done 完成  |  /chat 对话  |  /report 日报")
-    print("  也可直接输入自然语言，AI 会自动识别意图")
-    print("  多行输入以单独 . 结束  |  /help 查看帮助")
-    print("=" * 50)
-    print()
+    _animate_intro()
 
     while True:
         try:
