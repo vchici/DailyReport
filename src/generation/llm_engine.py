@@ -46,11 +46,11 @@ async def generate_report(
             done_text = entry["raw_input"]
             for todo_text in entry["matched_todos"]:
                 matched_parts.append(f"- 「{done_text}」✅ 对应待办「{todo_text}」")
-    matched_text = "\n".join(matched_parts) if matched_parts else ""
+    matched_text = "\n".join(matched_parts) if matched_parts else "无"
 
     # 格式化历史关联记录
     if related_entries:
-        lines = ["\n## 历史相关记录"]
+        lines = []
         for i, entry in enumerate(related_entries, 1):
             date = entry.get("date", "未知日期")
             raw = entry.get("raw_input", "")
@@ -58,7 +58,7 @@ async def generate_report(
             lines.append(f"{i}. [{date}] {raw}（标签：{ents}）")
         related_text = "\n".join(lines)
     else:
-        related_text = ""
+        related_text = "无"
 
     response = await client.chat.completions.create(
         model=settings.model_name,
