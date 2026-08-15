@@ -1,7 +1,12 @@
 import asyncio
-import readline  # 启用 GNU readline 行编辑，修复 CJK 回撤输入错乱
 import time
 from datetime import datetime
+
+# readline 仅 Unix 可用，Windows 下跳过（CJK 回撤问题由 pyreadline3 或终端自行处理）
+try:
+    import readline  # noqa: F401
+except ImportError:
+    readline = None
 
 from rich.align import Align
 from rich.console import Console, Group
