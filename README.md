@@ -12,13 +12,7 @@
 
 ## 快速开始
 
-1. 安装依赖
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. 配置环境变量
+1. 配置环境变量（仅首次）
 
    ```bash
    cp .env.example .env
@@ -27,17 +21,17 @@
 
    `.env` 支持任意 OpenAI 兼容接口（OpenAI / DeepSeek / Qwen 等），只需修改 `OPENAI_BASE_URL` 与 `MODEL_NAME`。
 
-3. 运行
+2. 启动
+
+   - Windows：双击 [dailyreport.bat](dailyreport.bat)
+   - macOS / Linux：先执行 `chmod +x dailyreport.command`，之后双击或运行 `./dailyreport.command`
+
+   首次运行会自动创建虚拟环境并安装依赖，之后每次直接启动即可，无需手动激活虚拟环境。
+
+   也可以手动运行：
 
    ```bash
    python main.py
-   ```
-
-   也可以安装后通过命令启动：
-
-   ```bash
-   pip install -e .
-   dailyreport
    ```
 
 ## 命令详解
