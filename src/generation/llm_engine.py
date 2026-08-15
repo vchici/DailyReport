@@ -15,7 +15,7 @@ async def generate_report(
     client: AsyncOpenAI,
     settings: Settings,
     entries: list[dict],
-    related_entries: list[dict] | None = None,
+    related_entries: list[tuple[str, dict]] | None = None,
 ) -> str:
     """调用 LLM 根据当日全部条目（含待办和已完成）生成日报。"""
     if not entries:
@@ -51,8 +51,7 @@ async def generate_report(
     # 格式化历史关联记录
     if related_entries:
         lines = []
-        for i, entry in enumerate(related_entries, 1):
-            date = entry.get("date", "未知日期")
+        for i, (date, entry) in enumerate(related_entries, 1):
             raw = entry.get("raw_input", "")
             ents = ", ".join(entry.get("entities", []))
             lines.append(f"{i}. [{date}] {raw}（标签：{ents}）")
@@ -79,7 +78,7 @@ async def chat_response(
     client: AsyncOpenAI,
     settings: Settings,
     user_query: str,
-    related_entries: list[dict],
+    related_entries: list[tuple[str, dict]],
     web_results: list[dict] | None = None,
     history: list[dict] | None = None,
 ) -> str:
@@ -90,8 +89,7 @@ async def chat_response(
     # 格式化本地历史
     if related_entries:
         lines = []
-        for i, entry in enumerate(related_entries, 1):
-            date = entry.get("date", "未知日期")
+        for i, (date, entry) in enumerate(related_entries, 1):
             raw = entry.get("raw_input", "")
             lines.append(f"{i}. [{date}] {raw}")
         related_text = "\n".join(lines)
@@ -132,15 +130,14 @@ async def generate_suggestion(
     settings: Settings,
     raw_input: str,
     entities: list[str],
-    related_entries: list[dict],
+    related_entries: list[tuple[str, dict]],
     web_results: list[dict] | None = None,
 ) -> str:
     """针对用户计划，结合本地历史和联网搜索生成建议方案。"""
     # 格式化本地历史关联记录
     if related_entries:
         lines = []
-        for i, entry in enumerate(related_entries, 1):
-            date = entry.get("date", "未知日期")
+        for i, (date, entry) in enumerate(related_entries, 1):
             raw = entry.get("raw_input", "")
             lines.append(f"{i}. [{date}] {raw}")
         related_text = "\n".join(lines)

@@ -25,6 +25,8 @@ console = Console()
 HELP_TEXT = """命令说明：
   /plan          记录待办事项（多行输入，以单独的 . 结束）
   /done          记录已完成事项（多行输入，以单独的 . 结束）
+  /edit          修改已记录的事项（全部记录，分页选择）
+  /delete        删除已记录的事项（全部记录，分页选择）
   /chat <内容>   自由对话，Agent 会检索历史记录和联网信息回答
   /report        生成本日完整日报
   /status        查看今日概况
@@ -32,20 +34,138 @@ HELP_TEXT = """命令说明：
   /exit          退出"""
 
 
-def read_multiline(first_line: str = "") -> str:
+def read_multiline(first_line: str = "", prompt: str = "  ") -> str:
     """读取多行输入，以单独的 . 行结束。"""
     lines: list[str] = []
     if first_line:
         lines.append(first_line)
     while True:
         try:
-            line = input("  ")
+            line = input(prompt)
         except (EOFError, KeyboardInterrupt):
             break
         if line.strip() == ".":
             break
         lines.append(line)
     return "\n".join(lines)
+
+
+PAGE_SIZE = 10
+
+
+def _print_entries_page(entries: list[tuple[str, dict]], start: int, end: int, page: int, total_pages: int, title: str) -> None:
+    table = Table(title=f"{title}（第 {page + 1}/{total_pages} 页）", show_header=True, header_style="bold cyan", box=None, padding=(0, 1))
+    table.add_column("#", style="bold", width=4)
+    table.add_column("日期", width=12)
+    table.add_column("时间", style="dim", width=8)
+    table.add_column("状态", width=8)
+    table.add_column("内容", style="dim")
+    for i in range(start, end):
+        date_str, entry = entries[i]
+        status = "待办" if entry.get("status") == "todo" else "已完成"
+        raw = (entry.get("raw_input") or "").replace("\n", " ")[:40]
+        table.add_row(str(i - start + 1), date_str, entry.get("time", ""), status, raw)
+    console.print(table)
+
+
+def _browse_entries(
+    entries: list[tuple[str, dict]],
+    title: str = "全部记录",
+    page: int = 0,
+) -> tuple[int | None, int]:
+    """分页浏览条目，返回 (选中的全局索引, 当前页码)；取消时索引为 None。"""
+    if not entries:
+        print("暂无记录。\n")
+        return None, page
+
+    total_pages = (len(entries) + PAGE_SIZE - 1) // PAGE_SIZE
+    while True:
+        start = page * PAGE_SIZE
+        end = min(start + PAGE_SIZE, len(entries))
+        _print_entries_page(entries, start, end, page, total_pages, title)
+
+        try:
+            choice = input("输入编号选择，n 下一页，p 上一页，g 页码 跳转，q 退出: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return None, page
+
+        if choice in ("q", ""):
+            return None, page
+        if choice == "n":
+            if page < total_pages - 1:
+                page += 1
+            else:
+                print("已是最后一页。")
+            continue
+        if choice == "p":
+            if page > 0:
+                page -= 1
+            else:
+                print("已是第一页。")
+            continue
+        if choice.startswith("g"):
+            spec = choice[1:].strip()
+            if spec.isdigit():
+                target = int(spec)
+                if 1 <= target <= total_pages:
+                    page = target - 1
+                else:
+                    print(f"页码需在 1-{total_pages} 之间。")
+            else:
+                print("输入无效，请重新输入。")
+            continue
+        if choice.isdigit():
+            n = int(choice)
+            if 1 <= n <= (end - start):
+                return start + n - 1, page
+        print("输入无效，请重新输入。")
+
+
+async def _edit_entry(agent: DailyReportAgent) -> None:
+    """交互式修改已记录的事项（全部记录，分页选择），输入 q 退出。"""
+    page = 0
+    while True:
+        entries = agent.list_all_entries()
+        global_index, page = _browse_entries(entries, title="选择要修改的记录", page=page)
+        if global_index is None:
+            return
+
+        date_str, entry = entries[global_index]
+        status = "待办" if entry.get("status") == "todo" else "已完成"
+        print(f"\n当前内容（{date_str} {status}，{entry.get('time', '')}）：\n{entry.get('raw_input', '')}\n")
+        print("请输入新的完整内容（多行输入，单独一行 . 结束；直接输入 . 则取消修改）：")
+        new_content = read_multiline(prompt="  新内容 > ").strip()
+        if not new_content:
+            print("已取消修改。\n")
+            continue
+
+        print("\n⏳ 正在更新...\n")
+        result = await agent.edit_entry(date_str, entry["_index"], new_content)
+        print(result)
+        print()
+
+
+def _delete_entry(agent: DailyReportAgent) -> None:
+    """交互式删除已记录的事项（全部记录，分页选择）。"""
+    entries = agent.list_all_entries()
+    global_index, _ = _browse_entries(entries, title="选择要删除的记录")
+    if global_index is None:
+        return
+
+    date_str, entry = entries[global_index]
+    status = "待办" if entry.get("status") == "todo" else "已完成"
+    print(f"\n确认删除（{date_str} {status}，{entry.get('time', '')}）：\n{entry.get('raw_input', '')}\n")
+    try:
+        confirm = input("确认删除？(y/n，直接回车取消): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        confirm = "n"
+    if confirm not in ("y", "yes"):
+        print("已取消删除。\n")
+        return
+
+    result = agent.remove_entry(date_str, entry["_index"])
+    print(result)
+    print()
 
 
 def _animate_intro() -> None:
@@ -56,6 +176,8 @@ def _animate_intro() -> None:
     rows = [
         ("/plan", "记录待办事项（多行，以单独 . 结束）", None),
         ("/done", "记录已完成事项", None),
+        ("/edit", "修改已记录的事项", None),
+        ("/delete", "删除已记录的事项", None),
         ("/chat", "自由对话，检索历史 + 联网信息", None),
         ("/report", "生成本日完整日报", None),
         ("/status", "查看今日概况", None),
@@ -159,6 +281,12 @@ async def _run() -> None:
             result = await agent.done(content)
             print(result)
             print()
+
+        elif cmd_line.startswith("/edit"):
+            await _edit_entry(agent)
+
+        elif cmd_line.startswith(("/delete", "/del")):
+            _delete_entry(agent)
 
         elif cmd_line.startswith("/chat"):
             content = cmd_line.removeprefix("/chat").strip()

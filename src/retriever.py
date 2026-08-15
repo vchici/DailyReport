@@ -1,58 +1,25 @@
-import re
 from pathlib import Path
 from typing import Optional
 
-import jieba
-
 from .storage import DATA_DIR, load_entries, save_entries
-
-# 关闭 jieba 的词典加载日志（Building prefix dict 那几行噪音）
-jieba.setLogLevel(20)
-
-# 中文常见停用词 + 英文单字母，分词后过滤
-_STOP_WORDS: set[str] = {
-    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
-    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着",
-    "没有", "看", "好", "自己", "这", "他", "她", "它", "们", "那", "些",
-    "什么", "怎么", "如何", "为什么", "可以", "这个", "那个", "所以",
-    "a", "an", "the", "is", "are", "was", "were", "be", "been",
-    "in", "on", "at", "to", "for", "of", "with", "by", "from",
-    "and", "or", "but", "not", "no", "if", "so", "as", "it",
-    "this", "that", "these", "those", "i", "we", "you", "he", "she",
-}
+from .tokenizer import tokenize as _tokenize
 
 # 内存缓存：本次进程生命周期内命中
 _cache_mtimes: dict[str, float] = {}
 _cache_entries: Optional[list[dict]] = None
+_entry_dates: list[str] = []
 
 # 倒排索引：token/entity → 条目下标集合，避免检索时全量扫描
 _entity_index: dict[str, set[int]] = {}
 _token_index: dict[str, set[int]] = {}
 
 
-def _tokenize(text: str) -> list[str]:
-    """用 jieba 分词，去停用词和单字、标点，返回归一化词列表。"""
-    words: list[str] = []
-    for w in jieba.cut(text):
-        w = w.strip().lower()
-        if not w:
-            continue
-        if len(w) < 2:
-            continue
-        if re.fullmatch(r"[\W_]+", w):
-            continue
-        if w in _STOP_WORDS:
-            continue
-        words.append(w)
-    return words
-
-
 def retrieve_related(
     entities: list[str],
     top_k: int = 5,
     exclude_date: str | None = None,
-) -> list[dict]:
-    """按实体标签搜索历史记录，返回 top_k 最相关条目。
+) -> list[tuple[str, dict]]:
+    """按实体标签搜索历史记录，返回 top_k 个 (日期, 条目) 元组。
 
     entities 来自 LLM 从用户输入中提取的概念词。
     检索时同时用原始标签和分词结果匹配，加权打分。
@@ -78,8 +45,8 @@ def retrieve_related(
 def search_by_text(
     query: str,
     top_k: int = 5,
-) -> list[dict]:
-    """全文搜索所有条目的 raw_input 文本。
+) -> list[tuple[str, dict]]:
+    """全文搜索所有条目的 raw_input 文本，返回 top_k 个 (日期, 条目) 元组。
 
     query 来自用户原始输入语句，分词后做加权两阶段检索。
     """
@@ -131,22 +98,24 @@ def _collect_all_entries() -> list[dict]:
 
     # ── 缓存失效，重新读取所有日期文件 ──
     all_entries: list[dict] = []
+    entry_dates: list[str] = []
     for file_path_str in sorted(current_mtimes):
         file_path = Path(file_path_str) if file_path_str.startswith("/") else DATA_DIR / file_path_str
         entries = load_entries(file_path.stem)
         needs_save = False
         for entry in entries:
-            entry.setdefault("date", file_path.stem)
             if "_tokens" not in entry:
                 entry["_tokens"] = _tokenize(entry.get("raw_input", ""))
                 needs_save = True
             all_entries.append(entry)
+            entry_dates.append(file_path.stem)
         if needs_save:
             save_entries(entries, file_path.stem)
 
     # 更新内存缓存并重建倒排索引
     _cache_mtimes = current_mtimes
     _cache_entries = all_entries
+    _entry_dates = entry_dates
     _build_inverted_index(all_entries)
 
     return all_entries
@@ -157,12 +126,12 @@ def _retrieve(
     query_tokens: set[str],
     top_k: int,
     exclude_date: str | None = None,
-) -> list[dict]:
+) -> list[tuple[str, dict]]:
     """统一的加权两阶段检索（倒排索引加速）。
 
     第一阶段 query_tokens × entities —— 概念级匹配，2倍权重
     第二阶段 query_tokens × _tokens —— 词级匹配，1倍权重
-    加权总分排序后返回 top_k。
+    加权总分排序后返回 top_k 个 (日期, 条目) 元组。
 
     通过全局倒排索引定位候选条目，避免全量扫描。
     entries 必须是 _collect_all_entries() 的返回值，
@@ -171,16 +140,16 @@ def _retrieve(
     scores: dict[int, int] = {}
     for qt in query_tokens:
         for idx in _entity_index.get(qt, ()):
-            if exclude_date and entries[idx].get("date") == exclude_date:
+            if exclude_date and _entry_dates[idx] == exclude_date:
                 continue
             scores[idx] = scores.get(idx, 0) + 2
         for idx in _token_index.get(qt, ()):
-            if exclude_date and entries[idx].get("date") == exclude_date:
+            if exclude_date and _entry_dates[idx] == exclude_date:
                 continue
             scores[idx] = scores.get(idx, 0) + 1
 
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [entries[idx] for idx, _ in ranked[:top_k]]
+    return [(_entry_dates[idx], entries[idx]) for idx, _ in ranked[:top_k]]
 
 
 def match_done_to_todos(

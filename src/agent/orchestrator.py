@@ -6,7 +6,7 @@ from ..config import Settings
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..perception.text_parser import parse_events
 from ..retriever import match_done_to_todos, retrieve_related, search_by_text
-from ..storage import add_entry, load_entries, save_entries
+from ..storage import add_entry, delete_entry, load_all_entries, load_entries, save_entries
 from ..web_search import search_web
 from .state import Event
 
@@ -94,6 +94,46 @@ class DailyReportAgent:
         except Exception as e:
             return f"记录失败：{e}"
 
+    async def edit_entry(self, date_str: str, index: int, raw_input: str) -> str:
+        """编辑条目：删除原条目后，按新增逻辑重新添加（保留原日期、时间与状态）。"""
+        try:
+            entries = load_entries(date_str)
+            if not (0 <= index < len(entries)):
+                return "索引越界，未找到该条目。"
+            status = entries[index].get("status", "done")
+            time_str = entries[index].get("time")
+
+            _, events, entities = await parse_events(self.client, self.settings, raw_input)
+
+            delete_entry(date_str, index)
+            add_entry(raw_input, events, entities, status=status, date_str=date_str, time_str=time_str)
+
+            self._rebuild_matches(date_str)
+            return "✏️ 已更新记录"
+        except Exception as e:
+            return f"更新失败：{e}"
+
+    def remove_entry(self, date_str: str, index: int) -> str:
+        """删除指定条目，并重建当日待办匹配。"""
+        try:
+            delete_entry(date_str, index)
+            self._rebuild_matches(date_str)
+            return "🗑️ 已删除记录"
+        except Exception as e:
+            return f"删除失败：{e}"
+
+    def _rebuild_matches(self, date_str: str) -> None:
+        """重建指定日期所有「已完成 → 待办」的匹配关系。"""
+        entries = load_entries(date_str)
+        todos = [e for e in entries if e.get("status") == "todo"]
+        for e in entries:
+            if e.get("status") == "done":
+                e.pop("matched_todos", None)
+                matched = match_done_to_todos(e.get("entities", []), todos)
+                if matched:
+                    e["matched_todos"] = [t["raw_input"] for t in matched]
+        save_entries(entries, date_str)
+
     async def chat(self, query: str, entities: list[str] | None = None) -> str:
         """自由对话，检索历史 + 联网搜索后回答。"""
         if not query.strip():
@@ -108,12 +148,12 @@ class DailyReportAgent:
             by_entity = retrieve_related(entities) if entities else []
             by_text = search_by_text(query)
             seen = set()
-            related: list[dict] = []
-            for entry in by_entity + by_text:
-                key = (entry.get("date"), entry.get("raw_input"))
+            related: list[tuple[str, dict]] = []
+            for date_str, entry in by_entity + by_text:
+                key = (date_str, entry.get("raw_input"))
                 if key not in seen:
                     seen.add(key)
-                    related.append(entry)
+                    related.append((date_str, entry))
 
             # 联网搜索
             search_query = " ".join(entities[:3]) if entities else query[:50]
@@ -158,6 +198,10 @@ class DailyReportAgent:
 
     def today_entry_count(self) -> int:
         return len(load_entries())
+
+    def list_all_entries(self) -> list[dict]:
+        """返回所有日期的全部记录（按日期倒序），供浏览/选择使用。"""
+        return load_all_entries()
 
     def today_summary(self) -> str:
         entries = load_entries()

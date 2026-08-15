@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .agent.state import Event
+from .tokenizer import tokenize
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -22,6 +23,18 @@ def load_entries(date_str: str | None = None) -> list[dict]:
         return json.load(f)
 
 
+def load_all_entries() -> list[tuple[str, dict]]:
+    """加载所有日期的全部条目（按日期倒序），返回 (日期, 条目) 列表，每条附 _index 字段。"""
+    all_entries: list[tuple[str, dict]] = []
+    for file_path in sorted(DATA_DIR.glob("*.json"), key=lambda p: p.name, reverse=True):
+        if not file_path.stem.startswith("20"):
+            continue
+        for idx, entry in enumerate(load_entries(file_path.stem)):
+            entry["_index"] = idx
+            all_entries.append((file_path.stem, entry))
+    return all_entries
+
+
 def save_entries(entries: list[dict], date_str: str | None = None):
     """保存条目到指定日期文件。"""
     file_path = _daily_file(date_str)
@@ -30,20 +43,32 @@ def save_entries(entries: list[dict], date_str: str | None = None):
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
+def delete_entry(date_str: str, index: int) -> list[dict]:
+    """删除指定日期文件中指定索引的条目，返回删除后该日期的剩余条目。"""
+    entries = load_entries(date_str)
+    if not (0 <= index < len(entries)):
+        raise IndexError("条目索引越界")
+    entries.pop(index)
+    save_entries(entries, date_str)
+    return entries
+
+
 def add_entry(
     raw_input: str,
     events: list[Event],
     entities: list[str] | None = None,
     status: str = "done",
     date_str: str | None = None,
+    time_str: str | None = None,
 ) -> list[dict]:
-    """添加一条新记录到当日文件，返回当日全部条目。
+    """添加一条新记录到指定日期文件，返回该日期全部条目。
 
     status: "todo"（待办）或 "done"（已完成）
+    time_str: 指定时间；缺省时使用当前时间。
     """
     entries = load_entries(date_str)
     entries.append({
-        "time": datetime.now().strftime("%H:%M"),
+        "time": time_str or datetime.now().strftime("%H:%M"),
         "raw_input": raw_input,
         "status": status,
         "events": [
@@ -51,6 +76,7 @@ def add_entry(
             for e in events
         ],
         "entities": entities or [],
+        "_tokens": tokenize(raw_input),
     })
     save_entries(entries, date_str)
     return entries
