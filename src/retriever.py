@@ -83,7 +83,7 @@ def _collect_all_entries() -> list[dict]:
     用文件 mtime 做内存缓存：同进程内数据未变则直接命中，
     否则重新读取所有日期 JSON（_tokens 已持久化，无需重复分词）。
     """
-    global _cache_mtimes, _cache_entries
+    global _cache_mtimes, _cache_entries, _entry_dates
 
     # ── 先收集当前所有 JSON 文件的 mtime ──
     current_mtimes: dict[str, float] = {}
