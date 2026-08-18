@@ -27,6 +27,13 @@ class DailyReportAgent:
         # 多轮对话历史（user/assistant 交替），仅本次运行内有效
         self.chat_history: list[dict[str, str]] = []
 
+    def reconfigure(self) -> None:
+        """配置变更后重建 OpenAI 客户端，使新配置立即生效。"""
+        self.client = AsyncOpenAI(
+            api_key=self.settings.openai_api_key,
+            base_url=self.settings.openai_base_url,
+        )
+
     # ── 自然语言入口 ──
 
     async def auto_dispatch(self, raw_input: str) -> str:

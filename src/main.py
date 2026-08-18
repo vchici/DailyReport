@@ -15,7 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .config import Settings
+from .config import Settings, save_env_file
 from .agent.orchestrator import DailyReportAgent
 
 
@@ -30,8 +30,106 @@ HELP_TEXT = """命令说明：
   /chat <内容>   自由对话，Agent 会检索历史记录和联网信息回答
   /report        生成本日完整日报
   /status        查看今日概况
+  /config        查看 / 修改 API 配置（Key、接口地址、模型）
   /help          显示此帮助
   /exit          退出"""
+
+
+def _mask_key(key: str) -> str:
+    """API Key 脱敏显示。"""
+    if not key:
+        return "(未配置)"
+    if len(key) <= 8:
+        return "*" * len(key)
+    return f"{key[:4]}...{key[-4:]}"
+
+
+def _ensure_api_key(settings: Settings) -> None:
+    """首次使用引导：未配置 API Key 时交互式询问并保存到用户目录。"""
+    if settings.openai_api_key:
+        return
+    console.print(Panel(
+        "[bold yellow]首次使用需要配置 API Key[/bold yellow]\n\n"
+        "dailyreport 通过 OpenAI 兼容接口调用大模型，\n"
+        "支持 OpenAI / DeepSeek / Qwen 等任意兼容服务。",
+        title="Daily Report 初始化",
+        border_style="cyan",
+    ))
+    try:
+        key = input("请输入 API Key（直接回车退出）: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n未配置 API Key，已退出。")
+        raise SystemExit(1)
+    if not key:
+        print("未配置 API Key，已退出。\n可稍后运行 /config 重新配置。")
+        raise SystemExit(1)
+
+    try:
+        base_url = input(f"API Base URL（直接回车默认 {settings.openai_base_url}）: ").strip()
+        model = input(f"模型名称（直接回车默认 {settings.model_name}）: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        base_url = ""
+        model = ""
+    if not base_url:
+        base_url = settings.openai_base_url
+    if not model:
+        model = settings.model_name
+
+    settings.openai_api_key = key
+    settings.openai_base_url = base_url
+    settings.model_name = model
+    path = save_env_file(
+        OPENAI_API_KEY=key,
+        OPENAI_BASE_URL=base_url,
+        MODEL_NAME=model,
+    )
+    print(f"✓ 配置已保存到 {path}\n")
+
+
+def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
+    """查看 / 修改 API 配置，修改后立即生效并持久化到用户目录。"""
+    while True:
+        print(f"\n当前配置：")
+        print(f"  API Key   : {_mask_key(settings.openai_api_key)}")
+        print(f"  Base URL  : {settings.openai_base_url}")
+        print(f"  模型      : {settings.model_name}")
+        print("\n  1. 修改 API Key")
+        print("  2. 修改 Base URL")
+        print("  3. 修改模型")
+        print("  q. 返回")
+        try:
+            choice = input("选择: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if choice in ("q", ""):
+            return
+        if choice == "1":
+            key = input("新的 API Key（直接回车取消）: ").strip()
+            if key:
+                settings.openai_api_key = key
+            else:
+                print("已取消。")
+                continue
+        elif choice == "2":
+            url = input(f"新的 Base URL（直接回车保持 {settings.openai_base_url}）: ").strip()
+            if url:
+                settings.openai_base_url = url
+        elif choice == "3":
+            model = input(f"新的模型（直接回车保持 {settings.model_name}）: ").strip()
+            if model:
+                settings.model_name = model
+        else:
+            print("输入无效。")
+            continue
+        save_env_file(
+            OPENAI_API_KEY=settings.openai_api_key,
+            OPENAI_BASE_URL=settings.openai_base_url,
+            MODEL_NAME=settings.model_name,
+        )
+        agent.reconfigure()
+        print("✓ 配置已更新并保存。")
 
 
 def read_multiline(first_line: str = "", prompt: str = "  ") -> str:
@@ -237,6 +335,7 @@ def _animate_intro() -> None:
 
 async def _run() -> None:
     settings = Settings()
+    _ensure_api_key(settings)
     agent = DailyReportAgent(settings)
 
     _animate_intro()
@@ -326,6 +425,9 @@ async def _run() -> None:
 
         elif cmd_line == "/help":
             print(f"\n{HELP_TEXT}\n")
+
+        elif cmd_line == "/config":
+            _config_command(settings, agent)
 
         elif cmd_line == "/exit":
             print("再见！")

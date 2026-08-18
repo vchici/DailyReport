@@ -12,6 +12,17 @@
 
 ## 快速开始
 
+### 方式一：pip 安装（推荐）
+
+```bash
+pip install ai-dailyreport
+dailyreport
+```
+
+首次运行会引导你配置 API Key（输入 `dailyreport` 后按提示操作即可），配置会保存在 `~/.config/ai-dailyreport/.env`，之后在任意目录运行都能读到。支持任意 OpenAI 兼容接口（OpenAI / DeepSeek / Qwen 等）。之后随时可用 `/config` 命令查看或修改配置。
+
+### 方式二：从源码运行
+
 1. 配置环境变量（仅首次）
 
    ```bash
@@ -60,6 +71,12 @@
 
 **巧思**：日报不只是罗列条目，而是把「已完成 / 待办」分组、把已匹配的「完成 ↔ 待办」对应关系注入提示词，并跨日期检索历史关联记录（排除当日），让模型在「关联发现」里发现今日事项与过往的关联（同一个人、同一个项目、相似话题等），同时把已完成对应的待办从「明日计划」中排除。
 
+### `/config` 查看 / 修改 API 配置
+
+查看当前配置（API Key 脱敏显示），并可交互式修改 API Key、Base URL、模型名称。修改后立即生效并保存到 `~/.config/ai-dailyreport/.env`。
+
+**巧思**：配置保存在用户目录而非项目目录，pip 安装后在任意目录运行都能读到；修改后无需重启程序，OpenAI 客户端会立即重建。
+
 ### `/status` 与自然语言
 
 `/status` 查看今日概况。此外，任何不以 `/` 开头的输入都会走「自然语言自动识别」：由 LLM 判断意图并分发到对应的处理逻辑。
@@ -95,6 +112,10 @@
 
 ## 数据存储
 
+所有数据保存在**运行目录**下的 `data/` 中（即你在哪个目录敲 `dailyreport`，数据就存在哪）：
+
 - `data/YYYY-MM-DD.json`：当日记录（待办 / 已完成，含结构化事件与实体标签）
 - `data/reports/YYYY-MM-DD.md`：生成的日报
 - `data/plans/YYYY-MM-DD.md`：`/plan` 保存的建议
+
+配置（API Key 等）则独立存放在 `~/.config/ai-dailyreport/.env`，与数据目录互不干扰。
