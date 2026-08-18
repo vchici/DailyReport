@@ -13,9 +13,15 @@ class Settings(BaseSettings):
     model_name: str = "gpt-4o-mini"
     temperature: float = 0.7
 
+    # 语义检索（embedding）配置，使用硅基流动的 OpenAI 兼容接口
+    siliconflow_api_key: str = ""
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_model: str = "BAAI/bge-large-zh-v1.5"
+
     class Config:
-        # 用户目录配置为默认，当前目录 .env 可覆盖（本地开发场景）
-        env_file = [str(USER_ENV_FILE), ".env"]
+        # 用户级配置优先（/config 命令行修改的配置在任意目录生效），
+        # 项目 .env 作为回退兜底（本地开发可预置默认值）
+        env_file = [".env", str(USER_ENV_FILE)]
         env_file_encoding = "utf-8"
 
 

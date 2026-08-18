@@ -60,14 +60,16 @@ def add_entry(
     status: str = "done",
     date_str: str | None = None,
     time_str: str | None = None,
+    embedding: list[float] | None = None,
 ) -> list[dict]:
     """添加一条新记录到指定日期文件，返回该日期全部条目。
 
     status: "todo"（待办）或 "done"（已完成）
     time_str: 指定时间；缺省时使用当前时间。
+    embedding: 实体标签的语义向量（可选），存在 _embedding 字段供向量检索使用。
     """
     entries = load_entries(date_str)
-    entries.append({
+    entry = {
         "time": time_str or datetime.now().strftime("%H:%M"),
         "raw_input": raw_input,
         "status": status,
@@ -77,7 +79,10 @@ def add_entry(
         ],
         "entities": entities or [],
         "_tokens": tokenize(raw_input),
-    })
+    }
+    if embedding:
+        entry["_embedding"] = embedding
+    entries.append(entry)
     save_entries(entries, date_str)
     return entries
 

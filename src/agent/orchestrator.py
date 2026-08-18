@@ -3,6 +3,7 @@ from datetime import datetime
 from openai import AsyncOpenAI
 
 from ..config import Settings
+from ..embedding import embed_entities
 from ..generation.llm_engine import chat_response, generate_report, generate_suggestion
 from ..perception.text_parser import parse_events
 from ..retriever import match_done_to_todos, retrieve_related, search_by_text
@@ -55,6 +56,12 @@ class DailyReportAgent:
         except Exception as e:
             return f"处理失败：{e}"
 
+    async def _embed_entities(self, entities: list[str]) -> list[float] | None:
+        """计算实体标签的语义向量（每实体独立 embed + 归一化平均）；失败返回 None 优雅降级。"""
+        if not entities:
+            return None
+        return await embed_entities(self.settings, entities)
+
     # ── 命令处理（接受可选的预解析参数，避免 auto_dispatch 重复调用 LLM）──
 
     async def plan(self, raw_input: str, events: list[Event] | None = None, entities: list[str] | None = None) -> str:
@@ -62,9 +69,9 @@ class DailyReportAgent:
         try:
             if events is None or entities is None:
                 _, events, entities = await parse_events(self.client, self.settings, raw_input)
-            add_entry(raw_input, events, entities, status="todo")
+            add_entry(raw_input, events, entities, status="todo", embedding=await self._embed_entities(entities))
 
-            related = retrieve_related(entities)
+            related = await retrieve_related(entities)
             query = " ".join(entities[:3]) if entities else raw_input[:50]
             web_results = await search_web(query, max_results=5)
 
@@ -81,7 +88,7 @@ class DailyReportAgent:
         try:
             if events is None or entities is None:
                 _, events, entities = await parse_events(self.client, self.settings, raw_input)
-            entries = add_entry(raw_input, events, entities, status="done")
+            entries = add_entry(raw_input, events, entities, status="done", embedding=await self._embed_entities(entities))
 
             # 匹配当日待办：用 done 的实体标签对比 todo 条目
             todos = [e for e in entries if e.get("status") == "todo"]
@@ -113,7 +120,11 @@ class DailyReportAgent:
             _, events, entities = await parse_events(self.client, self.settings, raw_input)
 
             delete_entry(date_str, index)
-            add_entry(raw_input, events, entities, status=status, date_str=date_str, time_str=time_str)
+            add_entry(
+                raw_input, events, entities,
+                status=status, date_str=date_str, time_str=time_str,
+                embedding=await self._embed_entities(entities),
+            )
 
             self._rebuild_matches(date_str)
             return "✏️ 已更新记录"
@@ -152,7 +163,7 @@ class DailyReportAgent:
                 _, _, entities = await parse_events(self.client, self.settings, query)
 
             # 双路检索：实体匹配 + 全文搜索，合并去重
-            by_entity = retrieve_related(entities) if entities else []
+            by_entity = await retrieve_related(entities) if entities else []
             by_text = search_by_text(query)
             seen = set()
             related: list[tuple[str, dict]] = []
@@ -192,7 +203,7 @@ class DailyReportAgent:
         for entry in entries:
             all_entities.extend(entry.get("entities", []))
 
-        related = retrieve_related(all_entities, exclude_date=self._today_str()) if all_entities else []
+        related = await retrieve_related(all_entities, exclude_date=self._today_str()) if all_entities else []
 
         try:
             report = await generate_report(

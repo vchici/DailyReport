@@ -87,6 +87,49 @@ def _ensure_api_key(settings: Settings) -> None:
     print(f"✓ 配置已保存到 {path}\n")
 
 
+def _embedding_config_menu(settings: Settings) -> None:
+    """子菜单：查看 / 修改硅基流动 Embedding 配置。"""
+    while True:
+        print(f"\nEmbedding 配置（语义检索，可留空禁用）：")
+        print(f"  API Key : {_mask_key(settings.siliconflow_api_key)}")
+        print(f"  Base URL: {settings.siliconflow_base_url}")
+        print(f"  模型    : {settings.embedding_model}")
+        print("\n  1. 修改 API Key")
+        print("  2. 修改 Base URL")
+        print("  3. 修改模型")
+        print("  q. 返回")
+        try:
+            choice = input("选择: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if choice in ("q", ""):
+            return
+        if choice == "1":
+            key = input("新的 API Key（直接回车取消）: ").strip()
+            if not key:
+                print("已取消。")
+                continue
+            settings.siliconflow_api_key = key
+        elif choice == "2":
+            url = input(f"新的 Base URL（直接回车保持 {settings.siliconflow_base_url}）: ").strip()
+            if url:
+                settings.siliconflow_base_url = url
+        elif choice == "3":
+            model = input(f"新的模型（直接回车保持 {settings.embedding_model}）: ").strip()
+            if model:
+                settings.embedding_model = model
+        else:
+            print("输入无效。")
+            continue
+        save_env_file(
+            SILICONFLOW_API_KEY=settings.siliconflow_api_key,
+            SILICONFLOW_BASE_URL=settings.siliconflow_base_url,
+            EMBEDDING_MODEL=settings.embedding_model,
+        )
+        print("✓ Embedding 配置已更新并保存。")
+
+
 def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
     """查看 / 修改 API 配置，修改后立即生效并持久化到用户目录。"""
     while True:
@@ -94,9 +137,11 @@ def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
         print(f"  API Key   : {_mask_key(settings.openai_api_key)}")
         print(f"  Base URL  : {settings.openai_base_url}")
         print(f"  模型      : {settings.model_name}")
+        print(f"  Embedding : {_mask_key(settings.siliconflow_api_key)} / {settings.embedding_model}")
         print("\n  1. 修改 API Key")
         print("  2. 修改 Base URL")
         print("  3. 修改模型")
+        print("  4. 修改 Embedding 配置")
         print("  q. 返回")
         try:
             choice = input("选择: ").strip().lower()
@@ -120,6 +165,9 @@ def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
             model = input(f"新的模型（直接回车保持 {settings.model_name}）: ").strip()
             if model:
                 settings.model_name = model
+        elif choice == "4":
+            _embedding_config_menu(settings)
+            continue
         else:
             print("输入无效。")
             continue

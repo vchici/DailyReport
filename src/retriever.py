@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -13,8 +14,11 @@ _entry_dates: list[str] = []
 _entity_index: dict[str, set[int]] = {}
 _token_index: dict[str, set[int]] = {}
 
+# 实体标签向量：与 _entry_dates 下标一一对应，无向量的条目为 None
+_embedding_matrix: list[list[float] | None] = []
 
-def retrieve_related(
+
+async def retrieve_related(
     entities: list[str],
     top_k: int = 5,
     exclude_date: str | None = None,
@@ -22,7 +26,8 @@ def retrieve_related(
     """按实体标签搜索历史记录，返回 top_k 个 (日期, 条目) 元组。
 
     entities 来自 LLM 从用户输入中提取的概念词。
-    检索时同时用原始标签和分词结果匹配，加权打分。
+    检索时同时用原始标签和分词结果匹配，加权打分；
+    若配置了 embedding 且历史条目带向量，则叠加实体向量余弦相似度（混合排序）。
     """
     if not entities:
         return []
@@ -39,7 +44,9 @@ def retrieve_related(
     if not query_tokens:
         return []
 
-    return _retrieve(_collect_all_entries(), query_tokens, top_k, exclude_date)
+    entries = _collect_all_entries()
+    query_emb = await _embed_query(entities)
+    return _retrieve(entries, query_tokens, top_k, exclude_date, query_emb)
 
 
 def search_by_text(
@@ -57,12 +64,15 @@ def search_by_text(
     if not query_tokens:
         return []
 
-    return _retrieve(_collect_all_entries(), query_tokens, top_k)
+    entries = _collect_all_entries()
+    lex_scores = _score_lexical(query_tokens)
+    ranked = sorted(lex_scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [(_entry_dates[idx], entries[idx]) for idx, _ in ranked[:top_k]]
 
 
 def _build_inverted_index(entries: list[dict]) -> None:
-    """根据条目列表构建倒排索引（entity 与 token 两套）。"""
-    global _entity_index, _token_index
+    """根据条目列表构建倒排索引（entity 与 token 两套）与实体向量矩阵。"""
+    global _entity_index, _token_index, _embedding_matrix
 
     entity_index: dict[str, set[int]] = {}
     token_index: dict[str, set[int]] = {}
@@ -75,6 +85,7 @@ def _build_inverted_index(entries: list[dict]) -> None:
             token_index.setdefault(t, set()).add(idx)
     _entity_index = entity_index
     _token_index = token_index
+    _embedding_matrix = [entry.get("_embedding") for entry in entries]
 
 
 def _collect_all_entries() -> list[dict]:
@@ -121,22 +132,11 @@ def _collect_all_entries() -> list[dict]:
     return all_entries
 
 
-def _retrieve(
-    entries: list[dict],
+def _score_lexical(
     query_tokens: set[str],
-    top_k: int,
     exclude_date: str | None = None,
-) -> list[tuple[str, dict]]:
-    """统一的加权两阶段检索（倒排索引加速）。
-
-    第一阶段 query_tokens × entities —— 概念级匹配，2倍权重
-    第二阶段 query_tokens × _tokens —— 词级匹配，1倍权重
-    加权总分排序后返回 top_k 个 (日期, 条目) 元组。
-
-    通过全局倒排索引定位候选条目，避免全量扫描。
-    entries 必须是 _collect_all_entries() 的返回值，
-    其下标与倒排索引中的下标一一对应。
-    """
+) -> dict[int, int]:
+    """两阶段加权打分：概念级（entity）2 倍权重 + 词级（token）1 倍权重。"""
     scores: dict[int, int] = {}
     for qt in query_tokens:
         for idx in _entity_index.get(qt, ()):
@@ -147,9 +147,80 @@ def _retrieve(
             if exclude_date and _entry_dates[idx] == exclude_date:
                 continue
             scores[idx] = scores.get(idx, 0) + 1
+    return scores
 
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [(_entry_dates[idx], entries[idx]) for idx, _ in ranked[:top_k]]
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """两个向量的余弦相似度。"""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _rank_hybrid(
+    lex_scores: dict[int, int],
+    query_emb: list[float] | None,
+    top_k: int,
+    exclude_date: str | None = None,
+) -> list[int]:
+    """词法分数与实体向量余弦相似度归一化后各占 0.5 加权合并，返回 top_k 个条目下标。
+
+    无向量可用（query_emb 为空或历史条目无向量）时退化为纯词法排序。
+    """
+    if query_emb is not None and _embedding_matrix:
+        candidates = set(lex_scores)
+        candidates.update(i for i, v in enumerate(_embedding_matrix) if v is not None)
+
+        max_lex = max(lex_scores.values()) if lex_scores else 0
+        combined: dict[int, float] = {}
+        for idx in candidates:
+            if exclude_date and _entry_dates[idx] == exclude_date:
+                continue
+            lex_norm = (lex_scores.get(idx, 0) / max_lex) if max_lex else 0.0
+            vec = _embedding_matrix[idx]
+            cos = _cosine(query_emb, vec) if vec else 0.0
+            combined[idx] = 0.5 * lex_norm + 0.5 * cos
+        ranked = sorted(combined.items(), key=lambda kv: kv[1], reverse=True)
+        return [idx for idx, _ in ranked[:top_k]]
+
+    ranked = sorted(lex_scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [idx for idx, _ in ranked[:top_k]]
+
+
+def _retrieve(
+    entries: list[dict],
+    query_tokens: set[str],
+    top_k: int,
+    exclude_date: str | None = None,
+    query_emb: list[float] | None = None,
+) -> list[tuple[str, dict]]:
+    """统一的检索入口：词法加权打分，叠加可选向量相似度后取 top_k。
+
+    通过全局倒排索引定位候选条目，避免全量扫描。
+    entries 必须是 _collect_all_entries() 的返回值，
+    其下标与倒排索引中的下标一一对应。
+    """
+    lex_scores = _score_lexical(query_tokens, exclude_date)
+    ranked = _rank_hybrid(lex_scores, query_emb, top_k, exclude_date)
+    return [(_entry_dates[idx], entries[idx]) for idx in ranked]
+
+
+async def _embed_query(entities: list[str]) -> list[float] | None:
+    """计算查询实体标签的向量；未配置或调用失败时返回 None（降级为纯词法）。"""
+    if not entities:
+        return None
+    try:
+        from .config import Settings
+        from .embedding import embed_entities
+
+        return await embed_entities(Settings(), entities)
+    except Exception:
+        return None
 
 
 def match_done_to_todos(
