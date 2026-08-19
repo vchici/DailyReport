@@ -1,9 +1,19 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-# 用户级配置目录：pip 安装后在任意目录运行也能找到配置
-USER_CONFIG_DIR = Path.home() / ".config" / "ai-dailyreport"
+# 应用目录名：用户级配置与数据目录共用，集中定义便于整体改名
+APP_DIR_NAME = "ai-dailyreport"
+
+
+def _user_config_dir() -> Path:
+    """用户级配置目录：优先 XDG_CONFIG_HOME，缺省 ~/.config。"""
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / APP_DIR_NAME
+
+
+USER_CONFIG_DIR = _user_config_dir()
 USER_ENV_FILE = USER_CONFIG_DIR / ".env"
 
 
@@ -17,6 +27,9 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_model: str = "BAAI/bge-large-zh-v1.5"
+
+    # 数据目录：留空使用默认（源码运行→项目 data/；pip 安装→用户级目录），可自定义
+    data_dir: str = ""
 
     class Config:
         # 用户级配置优先（/config 命令行修改的配置在任意目录生效），

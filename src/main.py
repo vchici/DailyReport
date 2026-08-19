@@ -15,8 +15,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from . import storage
 from .config import Settings, save_env_file
 from .agent.orchestrator import DailyReportAgent
+from .retriever import reset_cache
 
 
 console = Console()
@@ -130,6 +132,28 @@ def _embedding_config_menu(settings: Settings) -> None:
         print("✓ Embedding 配置已更新并保存。")
 
 
+def _data_dir_config(settings: Settings) -> None:
+    """子菜单：修改数据目录；输入 default 恢复默认目录。"""
+    print(f"\n当前数据目录：{storage.DATA_DIR}")
+    try:
+        path = input("新的数据目录（输入 default 恢复默认，直接回车取消）: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if not path:
+        print("已取消。")
+        return
+    if path.lower() == "default":
+        settings.data_dir = ""
+        storage.set_data_dir("")
+    else:
+        settings.data_dir = path
+        storage.set_data_dir(path)
+    reset_cache()
+    save_env_file(DATA_DIR=settings.data_dir)
+    print(f"✓ 数据目录已更新为 {storage.DATA_DIR}")
+
+
 def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
     """查看 / 修改 API 配置，修改后立即生效并持久化到用户目录。"""
     while True:
@@ -138,10 +162,12 @@ def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
         print(f"  Base URL  : {settings.openai_base_url}")
         print(f"  模型      : {settings.model_name}")
         print(f"  Embedding : {_mask_key(settings.siliconflow_api_key)} / {settings.embedding_model}")
+        print(f"  数据目录  : {storage.DATA_DIR}")
         print("\n  1. 修改 API Key")
         print("  2. 修改 Base URL")
         print("  3. 修改模型")
         print("  4. 修改 Embedding 配置")
+        print("  5. 修改数据目录")
         print("  q. 返回")
         try:
             choice = input("选择: ").strip().lower()
@@ -167,6 +193,9 @@ def _config_command(settings: Settings, agent: DailyReportAgent) -> None:
                 settings.model_name = model
         elif choice == "4":
             _embedding_config_menu(settings)
+            continue
+        elif choice == "5":
+            _data_dir_config(settings)
             continue
         else:
             print("输入无效。")
@@ -383,6 +412,7 @@ def _animate_intro() -> None:
 
 async def _run() -> None:
     settings = Settings()
+    storage.set_data_dir(settings.data_dir)
     _ensure_api_key(settings)
     agent = DailyReportAgent(settings)
 
@@ -469,7 +499,7 @@ async def _run() -> None:
             print(f"\n今日概况：{summary}\n")
             entries = agent.today_entry_count()
             if entries > 0:
-                print(f"共 {entries} 条记录，存储于 data/{agent._today_str()}.json\n")
+                print(f"共 {entries} 条记录，存储于 {storage.DATA_DIR / f'{agent._today_str()}.json'}\n")
 
         elif cmd_line == "/help":
             print(f"\n{HELP_TEXT}\n")

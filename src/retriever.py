@@ -2,7 +2,8 @@ import math
 from pathlib import Path
 from typing import Optional
 
-from .storage import DATA_DIR, load_entries, save_entries
+from . import storage
+from .storage import load_entries, save_entries
 from .tokenizer import tokenize as _tokenize
 
 # 内存缓存：本次进程生命周期内命中
@@ -98,7 +99,7 @@ def _collect_all_entries() -> list[dict]:
 
     # ── 先收集当前所有 JSON 文件的 mtime ──
     current_mtimes: dict[str, float] = {}
-    for file_path in sorted(DATA_DIR.glob("*.json")):
+    for file_path in sorted(storage.DATA_DIR.glob("*.json")):
         if not file_path.stem.startswith("20"):
             continue
         current_mtimes[str(file_path)] = file_path.stat().st_mtime
@@ -111,7 +112,7 @@ def _collect_all_entries() -> list[dict]:
     all_entries: list[dict] = []
     entry_dates: list[str] = []
     for file_path_str in sorted(current_mtimes):
-        file_path = Path(file_path_str) if file_path_str.startswith("/") else DATA_DIR / file_path_str
+        file_path = Path(file_path_str)
         entries = load_entries(file_path.stem)
         needs_save = False
         for entry in entries:
@@ -130,6 +131,18 @@ def _collect_all_entries() -> list[dict]:
     _build_inverted_index(all_entries)
 
     return all_entries
+
+
+def reset_cache() -> None:
+    """数据目录或内容变更后清空内存缓存与索引，下次检索时重新构建。"""
+    global _cache_mtimes, _cache_entries, _entry_dates
+    global _entity_index, _token_index, _embedding_matrix
+    _cache_mtimes = {}
+    _cache_entries = None
+    _entry_dates = []
+    _entity_index = {}
+    _token_index = {}
+    _embedding_matrix = []
 
 
 def _score_lexical(

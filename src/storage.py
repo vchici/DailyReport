@@ -1,11 +1,33 @@
 import json
+import os
+import sysconfig
 from datetime import datetime
 from pathlib import Path
 
 from .agent.state import Event
+from .config import APP_DIR_NAME
 from .tokenizer import tokenize
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+# 源码运行（本地开发）：项目内 data 目录
+_LOCAL_DATA_DIR = Path(__file__).parent.parent / "data"
+# pip 安装运行：用户级数据目录（优先 XDG_DATA_HOME，缺省 ~/.local/share）
+USER_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / APP_DIR_NAME
+
+# 按安装方式判断：代码位于 site-packages → pip 安装；否则 → 源码运行
+_SITE_PACKAGES = Path(sysconfig.get_paths().get("purelib", ""))
+_IS_SOURCE = not Path(__file__).resolve().is_relative_to(_SITE_PACKAGES)
+
+DATA_DIR = _LOCAL_DATA_DIR if _IS_SOURCE else USER_DATA_DIR
+
+
+def set_data_dir(path: str | None = None) -> Path:
+    """按用户配置设置数据目录；未配置/空值回退默认目录。返回最终生效的目录。"""
+    global DATA_DIR
+    if path and path.strip():
+        DATA_DIR = Path(path.strip()).expanduser()
+    else:
+        DATA_DIR = _LOCAL_DATA_DIR if _IS_SOURCE else USER_DATA_DIR
+    return DATA_DIR
 
 
 def _daily_file(date_str: str | None = None) -> Path:
