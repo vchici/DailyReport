@@ -62,7 +62,8 @@ def save_entries(entries: list[dict], date_str: str | None = None):
     file_path = _daily_file(date_str)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2)
+        # 紧凑输出：1024 维 _embedding 若按 indent=2 会独占 1000+ 行，改为单行存储
+        json.dump(entries, f, ensure_ascii=False)
 
 
 def delete_entry(date_str: str, index: int) -> list[dict]:
